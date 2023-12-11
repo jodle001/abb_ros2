@@ -46,7 +46,7 @@ def generate_test_description():
             "use_fake_hardware:=",
             "true",
             " ",
-            "fake_sensor_commands:=",
+            "mock_sensor_commands:=",
             "false",
         ]
     )

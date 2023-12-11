@@ -2,6 +2,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.actions import OpaqueFunction
+from launch.conditions import IfCondition
 from launch.substitutions import (
     Command,
     FindExecutable,
@@ -31,6 +32,7 @@ def launch_setup(context, *args, **kwargs):
     support_package = LaunchConfiguration("support_package")
     moveit_config_package = LaunchConfiguration("moveit_config_package")
     moveit_config_file = LaunchConfiguration("moveit_config_file")
+    launch_rviz = LaunchConfiguration("launch_rviz")
 
     # Planning context
     robot_description_content = Command(
@@ -130,6 +132,7 @@ def launch_setup(context, *args, **kwargs):
     rviz_config = os.path.join(rviz_base, "moveit.rviz")
     rviz_node = Node(
         package="rviz2",
+        condition=IfCondition(launch_rviz),
         executable="rviz2",
         name="rviz2",
         output="log",
@@ -196,6 +199,11 @@ def generate_launch_description():
             "moveit_config_file",
             description="Name of the SRDF file",
             choices=["abb_irb1200_5_90.srdf.xacro"],
+        )
+    )
+    declared_arguments.append(
+        DeclareLaunchArgument(
+            "launch_rviz", default_value="true", description="Launch RViz?"
         )
     )
 

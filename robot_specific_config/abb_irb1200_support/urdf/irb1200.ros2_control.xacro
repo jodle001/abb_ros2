@@ -7,7 +7,7 @@
         <!-- ros2_control simulation -->
         <xacro:if value="${use_fake_hardware}">
           <plugin>mock_components/GenericSystem</plugin>
-          <param name="fake_sensor_commands">false</param>
+          <param name="mock_sensor_commands">false</param>
           <param name="state_following_offset">0.0</param>
         </xacro:if>
         <!-- physical hardware or RobotStudio simulation -->
@@ -31,7 +31,9 @@
         <state_interface name="position">
           <param name="initial_value">0.0</param>
         </state_interface>
-        <state_interface name="velocity"/>
+        <state_interface name="velocity">
+            <param name="initial_value">0.0</param>
+        </state_interface>
       </joint>
       <joint name="${prefix}joint_2">
         <command_interface name="position">
@@ -42,7 +44,9 @@
         <state_interface name="position">
           <param name="initial_value">0.0</param>
         </state_interface>
-        <state_interface name="velocity"/>
+        <state_interface name="velocity">
+          <param name="initial_value">0.0</param>
+        </state_interface>
       </joint>
       <joint name="${prefix}joint_3">
         <command_interface name="position">
@@ -53,7 +57,9 @@
         <state_interface name="position">
           <param name="initial_value">0.0</param>
         </state_interface>
-        <state_interface name="velocity"/>
+        <state_interface name="velocity">
+          <param name="initial_value">0.0</param>
+        </state_interface>
       </joint>
       <joint name="${prefix}joint_4">
         <command_interface name="position">
@@ -64,7 +70,9 @@
         <state_interface name="position">
           <param name="initial_value">0.0</param>
         </state_interface>
-        <state_interface name="velocity"/>
+        <state_interface name="velocity">
+          <param name="initial_value">0.0</param>
+        </state_interface>
       </joint>
       <joint name="${prefix}joint_5">
         <command_interface name="position">
@@ -75,7 +83,9 @@
         <state_interface name="position">
           <param name="initial_value">0.0</param>
         </state_interface>
-        <state_interface name="velocity"/>
+        <state_interface name="velocity">
+          <param name="initial_value">0.0</param>
+        </state_interface>
       </joint>
       <joint name="${prefix}joint_6">
         <command_interface name="position">
@@ -86,7 +96,9 @@
         <state_interface name="position">
           <param name="initial_value">0.0</param>
         </state_interface>
-        <state_interface name="velocity"/>
+        <state_interface name="velocity">
+          <param name="initial_value">0.0</param>
+        </state_interface>
       </joint>
     </ros2_control>
   </xacro:macro>
