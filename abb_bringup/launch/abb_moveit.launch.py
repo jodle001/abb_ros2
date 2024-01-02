@@ -34,7 +34,7 @@ def launch_setup(context, *args, **kwargs):
 
     # MoveIt configuration
     moveit_config = (
-        MoveItConfigsBuilder("abb_irb1200_5_90")
+        MoveItConfigsBuilder("abb_bringup", package_name=f'{moveit_config_package.perform(context)}')
         .robot_description(file_path=os.path.join(
             get_package_share_directory(f'{support_package.perform(context)}'),
             'urdf', f'{robot_xacro_file.perform(context)}'))
@@ -50,7 +50,11 @@ def launch_setup(context, *args, **kwargs):
         .trajectory_execution(file_path=os.path.join(
             get_package_share_directory(f'{moveit_config_package.perform(context)}'),
             'config', 'moveit_controllers.yaml'))
-        .planning_scene_monitor(True, True, True, True, True, True)
+       .planning_scene_monitor(
+           publish_planning_scene=True,
+           publish_geometry_updates=True,
+           publish_state_updates=True,
+           publish_transforms_updates=True)
         .joint_limits(file_path=os.path.join(
             get_package_share_directory(f'{moveit_config_package.perform(context)}'),
             'config', 'joint_limits.yaml'))
@@ -60,7 +64,7 @@ def launch_setup(context, *args, **kwargs):
     # MoveIt controllers
     moveit_controllers = {
         "moveit_simple_controller_manager": load_yaml(f"{moveit_config_package.perform(context)}",
-                                                      "config/moveit_controllers.yaml"),
+                                                        "config/moveit_controllers.yaml"),
         "moveit_controller_manager": "moveit_simple_controller_manager/MoveItSimpleControllerManager",
     }
 
