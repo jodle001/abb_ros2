@@ -2,7 +2,7 @@
 # Specific joint properties can be changed with the keys [max_position, min_position, max_velocity, max_acceleration]
 # Joint limits can be turned off with [has_velocity_limits, has_acceleration_limits]
 joint_limits:
-  rob1_joint_1:
+ joint_1:
     has_position_limits: true
     min_position: -2.96706
     max_position: 2.96706
@@ -12,7 +12,7 @@ joint_limits:
     max_acceleration: 40.0
     has_jerk_limits: true
     max_jerk: 150.0
-  rob1_joint_2:
+ joint_2:
     has_position_limits: true
     min_position: -1.74533
     max_position: 2.26893
@@ -22,7 +22,7 @@ joint_limits:
     max_acceleration: 35.0
     has_jerk_limits: true
     max_jerk: 150.0
-  rob1_joint_3:
+ joint_3:
     has_position_limits: true
     min_position: -1.22173
     max_position: 6.283185
@@ -32,7 +32,7 @@ joint_limits:
     max_acceleration: 45.0
     has_jerk_limits: true
     max_jerk: 150.0
-  rob1_joint_4:
+ joint_4:
     has_position_limits: true
     min_position: -4.71239
     max_position: 4.71239
@@ -42,7 +42,7 @@ joint_limits:
     max_acceleration: 60.0
     has_jerk_limits: true
     max_jerk: 150.0
-  rob1_joint_5:
+ joint_5:
     has_position_limits: true
     min_position: -2.26893
     max_position: 2.26893
@@ -52,7 +52,7 @@ joint_limits:
     max_acceleration: 65.0
     has_jerk_limits: true
     max_jerk: 150.0
-  rob1_joint_6:
+ joint_6:
     has_position_limits: true
     min_position: -6.98132
     max_position: 6.98132
