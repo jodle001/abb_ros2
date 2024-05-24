@@ -93,6 +93,8 @@ CallbackReturn ABBSystemHardware::on_init(const hardware_interface::HardwareInfo
     }
   }
 
+  urcl_ft_sensor_measurements_.resize(6);
+
   // Configure EGM
   RCLCPP_INFO(LOGGER, "Configuring EGM interface...");
 
@@ -248,7 +250,20 @@ return_type ABBSystemHardware::read(const rclcpp::Time& time, const rclcpp::Dura
 
 return_type ABBSystemHardware::write(const rclcpp::Time& time, const rclcpp::Duration& period)
 {
+  if(j23_coupling_) 
+  {
+    motion_data_.groups[0].units[0].joints.at(2).command.position += (-1*J23_factor) * motion_data_.groups[0].units[0].joints.at(1).command.position;
+    motion_data_.groups[0].units[0].joints.at(2).command.velocity += (-1*J23_factor) * motion_data_.groups[0].units[0].joints.at(1).command.velocity;
+  }
+  
   egm_manager_->write(motion_data_);
+
+  if(j23_coupling_)
+  {
+    motion_data_.groups[0].units[0].joints.at(2).command.position += (J23_factor) * motion_data_.groups[0].units[0].joints.at(1).command.position;
+    motion_data_.groups[0].units[0].joints.at(2).command.velocity += (J23_factor) * motion_data_.groups[0].units[0].joints.at(1).command.velocity;
+  }
+
   return return_type::OK;
 }
 

@@ -70,6 +70,7 @@ private:
   std::unique_ptr<abb::robot::EGMManager> egm_manager_;
 
   // Store the state and commands for the robot(s)
+  std::vector<double> urcl_ft_sensor_measurements_;
   abb::robot::MotionData motion_data_;
   bool j23_coupling_ = false;
   double J23_factor = -1.0;
