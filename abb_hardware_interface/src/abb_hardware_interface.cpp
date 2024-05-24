@@ -32,6 +32,8 @@ CallbackReturn ABBSystemHardware::on_init(const hardware_interface::HardwareInfo
 
   const auto rws_port = stoi(info_.hardware_parameters["rws_port"]);
   const auto rws_ip = info_.hardware_parameters["rws_ip"];
+  const auto is_coupled = info_.hardware_parameters["j23_coupling"];
+  j23_coupling_ = is_coupled == "true";
 
   if (rws_ip == "None")
   {
@@ -98,6 +100,21 @@ CallbackReturn ABBSystemHardware::on_init(const hardware_interface::HardwareInfo
   try
   {
     abb::robot::initializeMotionData(motion_data_, robot_controller_description_);
+    abb::robot::SystemStateData system_state_data_;
+    rws_manager.collectAndUpdateRuntimeData(system_state_data_,motion_data_);
+    if(j23_coupling_){
+      motion_data_.groups[0].units[0].joints.at(2).state.position += J23_factor * motion_data_.groups[0].units[0].joints.at(1).state.position;
+      motion_data_.groups[0].units[0].joints.at(2).state.velocity += J23_factor * motion_data_.groups[0].units[0].joints.at(1).state.velocity;
+    }
+
+    for(uint i = 0; i < motion_data_.groups.size(); i++){
+      for(uint pp = 0; pp < motion_data_.groups[i].units.size(); pp++){
+        for(uint k = 0; k < motion_data_.groups[i].units[pp].joints.size(); k++){
+          motion_data_.groups[i].units[pp].joints[k].state.velocity = 0.0;
+          motion_data_.groups[i].units[pp].joints[k].command.position = motion_data_.groups[i].units[pp].joints[k].state.position;
+        }
+      }
+    }
   }
   catch (...)
   {
@@ -217,6 +234,15 @@ CallbackReturn ABBSystemHardware::on_activate(const rclcpp_lifecycle::State& /* 
 return_type ABBSystemHardware::read(const rclcpp::Time& time, const rclcpp::Duration& period)
 {
   egm_manager_->read(motion_data_);
+
+  for (int i = 0; i < motion_data_.groups[0].egm_channel_data.input.mutable_measuredforce()->force_size(); i++) {
+    urcl_ft_sensor_measurements_[i] = motion_data_.groups[0].egm_channel_data.input.mutable_measuredforce()->force(i);
+  }
+  if(j23_coupling_){
+    motion_data_.groups[0].units[0].joints.at(2).state.position += J23_factor * motion_data_.groups[0].units[0].joints.at(1).state.position;
+    motion_data_.groups[0].units[0].joints.at(2).state.velocity += J23_factor * motion_data_.groups[0].units[0].joints.at(1).state.velocity;
+  }
+
   return return_type::OK;
 }
 

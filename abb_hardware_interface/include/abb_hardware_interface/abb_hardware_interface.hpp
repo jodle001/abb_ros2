@@ -71,6 +71,8 @@ private:
 
   // Store the state and commands for the robot(s)
   abb::robot::MotionData motion_data_;
+  bool j23_coupling_ = false;
+  double J23_factor = -1.0;
 };
 
 }  // namespace abb_hardware_interface
