@@ -169,7 +169,11 @@ std::vector<hardware_interface::StateInterface> ABBSystemHardware::export_state_
         // TODO(seng): Consider changing joint names in robot description to match what comes
         // from the ABB robot description to avoid needing to strip the prefix here
         const auto pos = joint.name.find("joint");
-        const auto joint_name = joint.name.substr(pos);
+        auto joint_name = joint.name.substr(pos);
+        if (group.name == "extax") {
+          RCLCPP_ERROR(LOGGER, "External axis joint name: %s", joint_name.c_str());
+          joint_name = "ext_" + joint.name.substr(pos);
+        }
         state_interfaces.emplace_back(
             hardware_interface::StateInterface(joint_name, hardware_interface::HW_IF_POSITION, &joint.state.position));
         state_interfaces.emplace_back(
@@ -192,7 +196,11 @@ std::vector<hardware_interface::CommandInterface> ABBSystemHardware::export_comm
         // TODO(seng): Consider changing joint names in robot description to match what comes
         // from the ABB robot description to avoid needing to strip the prefix here
         const auto pos = joint.name.find("joint");
-        const auto joint_name = joint.name.substr(pos);
+        auto joint_name = joint.name.substr(pos);
+        if (group.name == "extax") {
+          RCLCPP_ERROR(LOGGER, "External axis joint name: %s", joint_name.c_str());
+          joint_name = "ext_" + joint.name.substr(pos);
+        }
         command_interfaces.emplace_back(hardware_interface::CommandInterface(
             joint_name, hardware_interface::HW_IF_POSITION, &joint.command.position));
         command_interfaces.emplace_back(hardware_interface::CommandInterface(
