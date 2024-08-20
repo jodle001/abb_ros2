@@ -171,7 +171,6 @@ std::vector<hardware_interface::StateInterface> ABBSystemHardware::export_state_
         const auto pos = joint.name.find("joint");
         auto joint_name = joint.name.substr(pos);
         if (group.name == "extax") {
-          RCLCPP_ERROR(LOGGER, "External axis joint name: %s", joint_name.c_str());
           joint_name = "ext_" + joint.name.substr(pos);
         }
         state_interfaces.emplace_back(
@@ -198,7 +197,6 @@ std::vector<hardware_interface::CommandInterface> ABBSystemHardware::export_comm
         const auto pos = joint.name.find("joint");
         auto joint_name = joint.name.substr(pos);
         if (group.name == "extax") {
-          RCLCPP_ERROR(LOGGER, "External axis joint name: %s", joint_name.c_str());
           joint_name = "ext_" + joint.name.substr(pos);
         }
         command_interfaces.emplace_back(hardware_interface::CommandInterface(
