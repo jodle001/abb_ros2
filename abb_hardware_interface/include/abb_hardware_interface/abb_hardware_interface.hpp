@@ -72,8 +72,18 @@ private:
   // Store the state and commands for the robot(s)
   std::vector<double> urcl_ft_sensor_measurements_;
   abb::robot::MotionData motion_data_;
+
+  // J2-J3 coupling parameters
   bool j23_coupling_ = false;
   double J23_factor = -1.0;
+
+  // Store raw (uncoupled) J3 position and velocity
+  // These are the actual values from the robot without coupling applied
+  double raw_j3_position_ = 0.0;
+  double raw_j3_velocity_ = 0.0;
+
+  // Track EGM connection state
+  bool egm_connected_ = false;
 };
 
 }  // namespace abb_hardware_interface
