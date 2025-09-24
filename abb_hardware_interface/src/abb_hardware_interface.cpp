@@ -260,7 +260,6 @@ namespace abb_hardware_interface {
       if (!was_connected && egm_connected_) {
         raw_j3_position_ = motion_data_.groups[0].units[0].joints.at(2).state.position;
         raw_j3_velocity_ = motion_data_.groups[0].units[0].joints.at(2).state.velocity;
-        RCLCPP_INFO(LOGGER, "EGM connection restored, re-synchronizing J3 position");
       }
 
       // Only update raw positions if we have a valid connection
