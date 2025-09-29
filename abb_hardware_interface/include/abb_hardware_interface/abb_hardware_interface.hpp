@@ -84,6 +84,8 @@ private:
 
   // Track EGM connection state
   bool egm_connected_ = false;
+  std::vector<double> last_positions_;
+  int unchanged_count_ = 0;
 };
 
 }  // namespace abb_hardware_interface

@@ -33,6 +33,8 @@ namespace abb_hardware_interface {
     const auto is_coupled = info_.hardware_parameters["j23_coupling"];
     j23_coupling_ = is_coupled == "true";
 
+    RCLCPP_WARN_STREAM(LOGGER, "j 2-3 Coupling: " << j23_coupling_);
+
     if (rws_ip == "None") {
       RCLCPP_FATAL(LOGGER, "RWS IP not specified");
       return CallbackReturn::ERROR;
@@ -115,6 +117,10 @@ namespace abb_hardware_interface {
           }
         }
       }
+      last_positions_ = std::vector<double>(motion_data_.groups[0].units[0].joints.size(),
+                                            std::numeric_limits<double>::quiet_NaN());
+      raw_j3_position_ = std::numeric_limits<double>::quiet_NaN();
+      raw_j3_velocity_ = std::numeric_limits<double>::quiet_NaN();
     } catch (...) {
       RCLCPP_ERROR_STREAM(LOGGER, "Failed to initialize motion data from robot controller description");
       return CallbackReturn::ERROR;
@@ -226,80 +232,77 @@ namespace abb_hardware_interface {
   }
 
   return_type ABBSystemHardware::read(const rclcpp::Time &time, const rclcpp::Duration &period) {
-    // Read data from EGM
-    egm_manager_->read(motion_data_);
-
-    // Check if we have a valid EGM connection by seeing if data is changing
-    // We'll track if joint 1 position changes (it should always update when connected)
-    static double last_j1_position = std::numeric_limits<double>::quiet_NaN();
-    static int unchanged_count = 0;
-
-    double current_j1_position = motion_data_.groups[0].units[0].joints.at(0).state.position;
-
-    // If position hasn't changed, increment counter
-    if (!std::isnan(last_j1_position) &&
-        std::abs(current_j1_position - last_j1_position) < 1e-10) {
-      unchanged_count++;
-    } else {
-      unchanged_count = 0;
-    }
-
-    // Consider disconnected if data hasn't changed for several cycles (e.g., 10 cycles)
+    // Store previous connection state
     bool was_connected = egm_connected_;
-    egm_connected_ = (unchanged_count < 10);
 
-    last_j1_position = current_j1_position;
+    // Try to read from EGM
+    egm_connected_ = egm_manager_->read(motion_data_);
 
-    // Update force sensor measurements
-    for (int i = 0; i < motion_data_.groups[0].egm_channel_data.input.mutable_measuredforce()->force_size(); i++) {
-      urcl_ft_sensor_measurements_[i] = motion_data_.groups[0].egm_channel_data.input.mutable_measuredforce()->force(i);
+    // Check if we just lost connection
+    if (was_connected && !egm_connected_) {
+      RCLCPP_WARN(LOGGER, "EGM connection lost");
     }
 
-    if (j23_coupling_) {
-      // If connection was just restored, re-sync the raw J3 position
-      if (!was_connected && egm_connected_) {
+    // Check if we just regained connection
+    if (!was_connected && egm_connected_) {
+      RCLCPP_INFO(LOGGER, "EGM connection restored");
+      // Re-sync raw J3 values when connection is restored
+      if (j23_coupling_) {
         raw_j3_position_ = motion_data_.groups[0].units[0].joints.at(2).state.position;
         raw_j3_velocity_ = motion_data_.groups[0].units[0].joints.at(2).state.velocity;
       }
+    }
 
-      // Only update raw positions if we have a valid connection
-      if (egm_connected_) {
-        raw_j3_position_ = motion_data_.groups[0].units[0].joints.at(2).state.position;
-        raw_j3_velocity_ = motion_data_.groups[0].units[0].joints.at(2).state.velocity;
+    // Only update values if connected
+    if (egm_connected_) {
+      // Update force/torque measurements
+      for (int i = 0; i < motion_data_.groups[0].egm_channel_data.input.mutable_measuredforce()->force_size(); i++) {
+        urcl_ft_sensor_measurements_[i] = motion_data_.groups[0].egm_channel_data.input.mutable_measuredforce()->
+            force(i);
       }
 
-      // Always compute the coupled position from raw values
-      motion_data_.groups[0].units[0].joints.at(2).state.position =
-          raw_j3_position_ + J23_factor * motion_data_.groups[0].units[0].joints.at(1).state.position;
-      motion_data_.groups[0].units[0].joints.at(2).state.velocity =
-          raw_j3_velocity_ + J23_factor * motion_data_.groups[0].units[0].joints.at(1).state.velocity;
+      // Apply J2-J3 coupling correctly
+      if (j23_coupling_) {
+        // Store the raw (uncoupled) J3 values
+        raw_j3_position_ = motion_data_.groups[0].units[0].joints.at(2).state.position;
+        raw_j3_velocity_ = motion_data_.groups[0].units[0].joints.at(2).state.velocity;
+
+        // Apply coupling by setting (not adding to) the coupled position
+        motion_data_.groups[0].units[0].joints.at(2).state.position =
+            raw_j3_position_ + J23_factor * motion_data_.groups[0].units[0].joints.at(1).state.position;
+        motion_data_.groups[0].units[0].joints.at(2).state.velocity =
+            raw_j3_velocity_ + J23_factor * motion_data_.groups[0].units[0].joints.at(1).state.velocity;
+      }
     }
+    // else: keep last valid values when disconnected
 
     return return_type::OK;
   }
 
   return_type ABBSystemHardware::write(const rclcpp::Time &time, const rclcpp::Duration &period) {
+    // Only send commands if connected
+    if (!egm_connected_) {
+      return return_type::OK; // Skip writing when disconnected
+    }
+
     if (j23_coupling_) {
       // Store the commanded coupled position
       double coupled_j3_cmd_pos = motion_data_.groups[0].units[0].joints.at(2).command.position;
       double coupled_j3_cmd_vel = motion_data_.groups[0].units[0].joints.at(2).command.velocity;
 
-      // Compute the raw J3 command by removing the J2 coupling
+      // Convert to raw (uncoupled) position for the robot
       motion_data_.groups[0].units[0].joints.at(2).command.position =
           coupled_j3_cmd_pos - J23_factor * motion_data_.groups[0].units[0].joints.at(1).command.position;
       motion_data_.groups[0].units[0].joints.at(2).command.velocity =
           coupled_j3_cmd_vel - J23_factor * motion_data_.groups[0].units[0].joints.at(1).command.velocity;
-    }
 
-    egm_manager_->write(motion_data_);
+      egm_manager_->write(motion_data_);
 
-    if (j23_coupling_) {
-      // Restore the coupled command for consistency with the rest of the system
-      // This is important so that the command interface stays consistent
-      motion_data_.groups[0].units[0].joints.at(2).command.position +=
-          J23_factor * motion_data_.groups[0].units[0].joints.at(1).command.position;
-      motion_data_.groups[0].units[0].joints.at(2).command.velocity +=
-          J23_factor * motion_data_.groups[0].units[0].joints.at(1).command.velocity;
+      // Restore the coupled values for internal state consistency
+      motion_data_.groups[0].units[0].joints.at(2).command.position = coupled_j3_cmd_pos;
+      motion_data_.groups[0].units[0].joints.at(2).command.velocity = coupled_j3_cmd_vel;
+    } else {
+      egm_manager_->write(motion_data_);
     }
 
     return return_type::OK;
