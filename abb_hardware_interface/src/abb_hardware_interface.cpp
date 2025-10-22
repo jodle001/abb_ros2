@@ -240,12 +240,12 @@ namespace abb_hardware_interface {
 
     // Check if we just lost connection
     if (was_connected && !egm_connected_) {
-      RCLCPP_WARN(LOGGER, "EGM connection lost");
+      RCLCPP_DEBUG(LOGGER, "EGM connection lost");
     }
 
     // Check if we just regained connection
     if (!was_connected && egm_connected_) {
-      RCLCPP_INFO(LOGGER, "EGM connection restored");
+      RCLCPP_DEBUG(LOGGER, "EGM connection restored");
       // Re-sync raw J3 values when connection is restored
       if (j23_coupling_) {
         raw_j3_position_ = motion_data_.groups[0].units[0].joints.at(2).state.position;
