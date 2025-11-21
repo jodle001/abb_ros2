@@ -39,66 +39,53 @@
 using hardware_interface::return_type;
 using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 
-namespace abb_hardware_interface {
-  class ABBSystemHardware : public hardware_interface::SystemInterface {
-  public:
-    RCLCPP_SHARED_PTR_DEFINITIONS(ABBSystemHardware)
+namespace abb_hardware_interface
+{
+class ABBSystemHardware : public hardware_interface::SystemInterface
+{
+public:
+  RCLCPP_SHARED_PTR_DEFINITIONS(ABBSystemHardware)
 
-    ROS2_CONTROL_DRIVER_PUBLIC
-    CallbackReturn on_init(const hardware_interface::HardwareInfo &info) override;
+  ROS2_CONTROL_DRIVER_PUBLIC
+  CallbackReturn on_init(const hardware_interface::HardwareInfo& info) override;
 
-    ROS2_CONTROL_DRIVER_PUBLIC
-    std::vector<hardware_interface::StateInterface> export_state_interfaces() override;
+  ROS2_CONTROL_DRIVER_PUBLIC
+  std::vector<hardware_interface::StateInterface> export_state_interfaces() override;
 
-    ROS2_CONTROL_DRIVER_PUBLIC
-    std::vector<hardware_interface::CommandInterface> export_command_interfaces() override;
+  ROS2_CONTROL_DRIVER_PUBLIC
+  std::vector<hardware_interface::CommandInterface> export_command_interfaces() override;
 
-    ROS2_CONTROL_DRIVER_PUBLIC
-    CallbackReturn on_activate(const rclcpp_lifecycle::State &previous_state) override;
+  ROS2_CONTROL_DRIVER_PUBLIC
+  CallbackReturn on_activate(const rclcpp_lifecycle::State& previous_state) override;
 
-    ROS2_CONTROL_DRIVER_PUBLIC
-    return_type read(const rclcpp::Time &time, const rclcpp::Duration &period) override;
+  ROS2_CONTROL_DRIVER_PUBLIC
+  return_type read(const rclcpp::Time& time, const rclcpp::Duration& period) override;
 
-    ROS2_CONTROL_DRIVER_PUBLIC
-    return_type write(const rclcpp::Time &time, const rclcpp::Duration &period) override;
+  ROS2_CONTROL_DRIVER_PUBLIC
+  return_type write(const rclcpp::Time& time, const rclcpp::Duration& period) override;
 
-  private:
-    // EGM
-    abb::robot::RobotControllerDescription robot_controller_description_;
-    std::unique_ptr<abb::robot::EGMManager> egm_manager_;
+private:
+  // EGM
+  abb::robot::RobotControllerDescription robot_controller_description_;
+  std::unique_ptr<abb::robot::EGMManager> egm_manager_;
 
-    // Store the state and commands for the robot(s)
-    std::vector<double> urcl_ft_sensor_measurements_;
-    abb::robot::MotionData motion_data_;
+  // Store the state and commands for the robot(s)
+  std::vector<double> urcl_ft_sensor_measurements_;
+  abb::robot::MotionData motion_data_;
 
-    // J2-J3 coupling parameters
-    bool j23_coupling_ = false;
-    double J23_factor = -1.0;
+  // J2-J3 coupling parameters
+  bool j23_coupling_ = false;
+  double J23_factor = -1.0;
 
-    // Store raw (uncoupled) J3 position and velocity
-    // These are the actual values from the robot without coupling applied
-    double raw_j3_position_ = 0.0;
-    double raw_j3_velocity_ = 0.0;
+  // Store raw (uncoupled) J3 position and velocity
+  // These are the actual values from the robot without coupling applied
+  double raw_j3_position_ = 0.0;
+  double raw_j3_velocity_ = 0.0;
 
-    // Track EGM connection state
-    bool egm_connected_ = false;
-    std::vector<double> last_positions_;
-    int unchanged_count_ = 0;
+  // Track EGM connection state
+  bool egm_connected_ = false;
+  std::vector<double> last_positions_;
+  int unchanged_count_ = 0;
+};
 
-    // Connection debouncing
-    static constexpr int CONNECTION_STABLE_THRESHOLD = 50; // cycles
-    int connection_stable_count_ = 0;
-    bool stable_egm_connected_ = false;
-
-    // Stale data detection
-    std::vector<double> last_raw_positions_;
-    int stale_data_count_ = 0;
-    static constexpr int STALE_DATA_THRESHOLD = 3;
-
-    // Last valid coupled J3 values
-    double last_valid_coupled_j3_position_ = 0.0;
-    double last_valid_coupled_j3_velocity_ = 0.0;
-
-    rclcpp::Clock clock_;
-  };
-} // namespace abb_hardware_interface
+}  // namespace abb_hardware_interface
