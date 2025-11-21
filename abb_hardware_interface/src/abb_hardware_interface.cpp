@@ -28,6 +28,8 @@ namespace abb_hardware_interface {
       return CallbackReturn::ERROR;
     }
 
+    clock_ = rclcpp::Clock();
+
     const auto rws_port = stoi(info_.hardware_parameters["rws_port"]);
     const auto rws_ip = info_.hardware_parameters["rws_ip"];
     const auto is_coupled = info_.hardware_parameters["j23_coupling"];
@@ -232,49 +234,107 @@ namespace abb_hardware_interface {
   }
 
   return_type ABBSystemHardware::read(const rclcpp::Time &time, const rclcpp::Duration &period) {
-    // Store previous connection state
-    bool was_connected = egm_connected_;
+    // Store previous stable connection state
+    bool was_stable_connected = stable_egm_connected_;
 
     // Try to read from EGM
-    egm_connected_ = egm_manager_->read(motion_data_);
+    bool current_read_status = egm_manager_->read(motion_data_);
 
-    // Check if we just lost connection
-    if (was_connected && !egm_connected_) {
-      RCLCPP_DEBUG(LOGGER, "EGM connection lost");
+    // Debounce the connection state
+    if (current_read_status == egm_connected_) {
+      connection_stable_count_++;
+      if (connection_stable_count_ >= CONNECTION_STABLE_THRESHOLD) {
+        stable_egm_connected_ = egm_connected_;
+        connection_stable_count_ = CONNECTION_STABLE_THRESHOLD; // Cap it
+      }
+    } else {
+      // State changed, reset counter and start debouncing
+      egm_connected_ = current_read_status;
+      connection_stable_count_ = 0;
     }
 
-    // Check if we just regained connection
-    if (!was_connected && egm_connected_) {
-      RCLCPP_DEBUG(LOGGER, "EGM connection restored");
-      // Re-sync raw J3 values when connection is restored
+    // Log transitions of stable state
+    if (was_stable_connected && !stable_egm_connected_) {
+      RCLCPP_INFO(LOGGER, "EGM connection lost");
+    } else if (!was_stable_connected && stable_egm_connected_) {
+      RCLCPP_INFO(LOGGER, "EGM connection restored");
+      // Re-sync raw J3 values when connection is stably restored
       if (j23_coupling_) {
         raw_j3_position_ = motion_data_.groups[0].units[0].joints.at(2).state.position;
         raw_j3_velocity_ = motion_data_.groups[0].units[0].joints.at(2).state.velocity;
+        last_raw_positions_ = std::vector<double>(motion_data_.groups[0].units[0].joints.size());
+        for (size_t i = 0; i < motion_data_.groups[0].units[0].joints.size(); i++) {
+          last_raw_positions_[i] = motion_data_.groups[0].units[0].joints.at(i).state.position;
+        }
+        stale_data_count_ = 0;
       }
     }
 
-    // Only update values if connected
-    if (egm_connected_) {
-      // Update force/torque measurements
-      for (int i = 0; i < motion_data_.groups[0].egm_channel_data.input.mutable_measuredforce()->force_size(); i++) {
-        urcl_ft_sensor_measurements_[i] = motion_data_.groups[0].egm_channel_data.input.mutable_measuredforce()->
-            force(i);
+    // Only update values if stably connected
+    if (stable_egm_connected_) {
+      // Check for stale data by comparing with previous positions
+      bool data_changed = false;
+      if (last_raw_positions_.empty()) {
+        last_raw_positions_.resize(motion_data_.groups[0].units[0].joints.size());
+        data_changed = true; // First read
+      } else {
+        static constexpr double POSITION_CHANGE_THRESHOLD = 1e-6; // radians
+        for (size_t i = 0; i < motion_data_.groups[0].units[0].joints.size(); i++) {
+          double current_pos = motion_data_.groups[0].units[0].joints.at(i).state.position;
+          if (std::abs(current_pos - last_raw_positions_[i]) > POSITION_CHANGE_THRESHOLD) {
+            data_changed = true;
+            break;
+          }
+        }
       }
 
-      // Apply J2-J3 coupling correctly
-      if (j23_coupling_) {
-        // Store the raw (uncoupled) J3 values
-        raw_j3_position_ = motion_data_.groups[0].units[0].joints.at(2).state.position;
-        raw_j3_velocity_ = motion_data_.groups[0].units[0].joints.at(2).state.velocity;
+      if (data_changed) {
+        stale_data_count_ = 0;
 
-        // Apply coupling by setting (not adding to) the coupled position
-        motion_data_.groups[0].units[0].joints.at(2).state.position =
-            raw_j3_position_ + J23_factor * motion_data_.groups[0].units[0].joints.at(1).state.position;
-        motion_data_.groups[0].units[0].joints.at(2).state.velocity =
-            raw_j3_velocity_ + J23_factor * motion_data_.groups[0].units[0].joints.at(1).state.velocity;
+        // Update force/torque measurements
+        for (int i = 0; i < motion_data_.groups[0].egm_channel_data.input.mutable_measuredforce()->force_size(); i++) {
+          urcl_ft_sensor_measurements_[i] = motion_data_.groups[0].egm_channel_data.input.mutable_measuredforce()->
+              force(i);
+        }
+
+        // Apply J2-J3 coupling with fresh data
+        if (j23_coupling_) {
+          raw_j3_position_ = motion_data_.groups[0].units[0].joints.at(2).state.position;
+          raw_j3_velocity_ = motion_data_.groups[0].units[0].joints.at(2).state.velocity;
+
+          motion_data_.groups[0].units[0].joints.at(2).state.position =
+              raw_j3_position_ + J23_factor * motion_data_.groups[0].units[0].joints.at(1).state.position;
+          motion_data_.groups[0].units[0].joints.at(2).state.velocity =
+              raw_j3_velocity_ + J23_factor * motion_data_.groups[0].units[0].joints.at(1).state.velocity;
+
+          // Store last valid coupled values
+          last_valid_coupled_j3_position_ = motion_data_.groups[0].units[0].joints.at(2).state.position;
+          last_valid_coupled_j3_velocity_ = motion_data_.groups[0].units[0].joints.at(2).state.velocity;
+        }
+
+        // Update last positions
+        for (size_t i = 0; i < motion_data_.groups[0].units[0].joints.size(); i++) {
+          last_raw_positions_[i] = motion_data_.groups[0].units[0].joints.at(i).state.position;
+        }
+      } else {
+        // Data hasn't changed - might be stale
+        stale_data_count_++;
+        if (stale_data_count_ >= STALE_DATA_THRESHOLD) {
+          RCLCPP_DEBUG_THROTTLE(LOGGER, clock_, 1000, "Receiving stale EGM data - freezing J3 at last valid value");
+          // Freeze at last valid coupled values
+          if (j23_coupling_) {
+            motion_data_.groups[0].units[0].joints.at(2).state.position = last_valid_coupled_j3_position_;
+            motion_data_.groups[0].units[0].joints.at(2).state.velocity = last_valid_coupled_j3_velocity_;
+          }
+        }
+      }
+    } else {
+      // Not stably connected - freeze at last valid coupled values
+      if (j23_coupling_ && !std::isnan(last_valid_coupled_j3_position_)) {
+        motion_data_.groups[0].units[0].joints.at(2).state.position = last_valid_coupled_j3_position_;
+        motion_data_.groups[0].units[0].joints.at(2).state.velocity = last_valid_coupled_j3_velocity_;
       }
     }
-    // else: keep last valid values when disconnected
 
     return return_type::OK;
   }
