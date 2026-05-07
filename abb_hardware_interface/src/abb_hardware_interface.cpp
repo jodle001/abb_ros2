@@ -30,21 +30,83 @@ CallbackReturn ABBSystemHardware::on_init(const hardware_interface::HardwareInfo
     return CallbackReturn::ERROR;
   }
 
-  const auto rws_port = stoi(info_.hardware_parameters["rws_port"]);
-  const auto rws_ip = info_.hardware_parameters["rws_ip"];
-
-  if (rws_ip == "None")
+  // configure_via_rws=false bypasses RWS entirely and constructs the
+  // RobotControllerDescription from URDF parameters. Used for OmniCore
+  // controllers where the RWS 1.0 protocol abb_librws speaks isn't supported.
+  bool configure_via_rws = true;
   {
-    RCLCPP_FATAL(LOGGER, "RWS IP not specified");
-    return CallbackReturn::ERROR;
+    const auto it = info_.hardware_parameters.find("configure_via_rws");
+    if (it != info_.hardware_parameters.end())
+    {
+      configure_via_rws = (it->second != "false" && it->second != "False" && it->second != "0");
+    }
   }
 
-  // Get robot controller description from RWS
-  abb::robot::RWSManager rws_manager(rws_ip, rws_port, "Default User", "robotics");
-  const auto robot_controller_description_ =
-      abb::robot::utilities::establishRWSConnection(rws_manager, "IRB1200", true);
-  RCLCPP_INFO_STREAM(LOGGER, "Robot controller description:\n"
-                                 << abb::robot::summaryText(robot_controller_description_));
+  if (configure_via_rws)
+  {
+    const auto rws_port = stoi(info_.hardware_parameters["rws_port"]);
+    const auto rws_ip = info_.hardware_parameters["rws_ip"];
+
+    if (rws_ip == "None")
+    {
+      RCLCPP_FATAL(LOGGER, "RWS IP not specified");
+      return CallbackReturn::ERROR;
+    }
+
+    // Get robot controller description from RWS
+    abb::robot::RWSManager rws_manager(rws_ip, rws_port, "Default User", "robotics");
+    robot_controller_description_ =
+        abb::robot::utilities::establishRWSConnection(rws_manager, "IRB1200", true);
+    RCLCPP_INFO_STREAM(LOGGER, "Robot controller description:\n"
+                                   << abb::robot::summaryText(robot_controller_description_));
+  }
+  else
+  {
+    // Build a minimal RobotControllerDescription from URDF info.
+    RCLCPP_INFO(LOGGER, "configure_via_rws=false: building controller description from URDF");
+
+    // RobotWare version (default 7.0 if not specified)
+    const auto rw_it = info_.hardware_parameters.find("robotware_version");
+    std::string rw_str = (rw_it != info_.hardware_parameters.end()) ? rw_it->second : "7.0";
+    int rw_major = 7, rw_minor = 0, rw_patch = 0;
+    sscanf(rw_str.c_str(), "%d.%d.%d", &rw_major, &rw_minor, &rw_patch);
+
+    auto* header = robot_controller_description_.mutable_header();
+    auto* rw_version = header->mutable_robot_ware_version();
+    rw_version->set_name(rw_str);
+    rw_version->set_major_number(rw_major);
+    rw_version->set_minor_number(rw_minor);
+    rw_version->set_patch_number(rw_patch);
+
+    auto* indicators = robot_controller_description_.mutable_system_indicators();
+    indicators->mutable_options()->set_egm(true);
+
+    // Single mechanical unit group — name empty so the EGM port lookup
+    // (group.name() + "egm_port") resolves to just "egm_port".
+    auto* group = robot_controller_description_.add_mechanical_units_groups();
+    group->set_name("");
+
+    auto* robot = group->mutable_robot();
+    robot->set_name("ROB_1");
+    robot->set_type(abb::robot::MechanicalUnit_Type_TCP_ROBOT);
+    robot->set_axes(static_cast<int>(info_.joints.size()));
+    robot->set_axes_total(static_cast<int>(info_.joints.size()));
+    robot->set_mode(abb::robot::MechanicalUnit_Mode_ACTIVATED);
+
+    for (const auto& joint : info_.joints)
+    {
+      auto* sj = robot->add_standardized_joints();
+      sj->set_original_name(joint.name);
+      sj->set_standardized_name(joint.name);
+      sj->set_rotating_move(true);
+      // Wide bounds — actual joint limits are enforced by URDF/controller.
+      sj->set_lower_joint_bound(-2.0 * M_PI);
+      sj->set_upper_joint_bound(2.0 * M_PI);
+    }
+
+    RCLCPP_INFO_STREAM(LOGGER, "Built controller description with " << info_.joints.size()
+                                                                     << " joints, RobotWare " << rw_str);
+  }
 
   for (const hardware_interface::ComponentInfo& joint : info_.joints)
   {
