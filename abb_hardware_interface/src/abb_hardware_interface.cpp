@@ -132,7 +132,13 @@ CallbackReturn ABBSystemHardware::on_init(const hardware_interface::HardwareInfo
   {
     try
     {
-      const auto egm_port = stoi(info_.hardware_parameters[group.name() + "egm_port"]);
+      const std::string port_key = group.name() + "egm_port";
+      if (!info_.hardware_parameters.count(port_key)) {
+        RCLCPP_FATAL_STREAM(LOGGER, "Mechanical unit group '" << group.name()
+            << "' has no EGM port param '" << port_key << "'");
+        return CallbackReturn::ERROR;
+      }
+      const auto egm_port = stoi(info_.hardware_parameters.at(port_key));
       const auto channel_configuration =
           abb::robot::EGMManager::ChannelConfiguration{ static_cast<uint16_t>(egm_port), group };
       channel_configurations.emplace_back(channel_configuration);
