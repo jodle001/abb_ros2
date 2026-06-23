@@ -76,6 +76,12 @@ if(BUILD_TESTING)
   set(ament_cmake_cpplint_FOUND TRUE)
   set(ament_cmake_uncrustify_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
+
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_build_description test/test_build_description.cpp)
+  target_include_directories(test_build_description PRIVATE include)
+  ament_target_dependencies(test_build_description ${THIS_PACKAGE_INCLUDE_DEPENDS})
+  target_link_libraries(test_build_description ${PROJECT_NAME})
 endif()
 
 ament_export_include_directories(include)

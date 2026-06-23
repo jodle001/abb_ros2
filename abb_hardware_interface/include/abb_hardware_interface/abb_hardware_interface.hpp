@@ -24,6 +24,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <hardware_interface/handle.hpp>
@@ -63,6 +64,10 @@ public:
 
   ROS2_CONTROL_DRIVER_PUBLIC
   return_type write(const rclcpp::Time& time, const rclcpp::Duration& period) override;
+
+  static abb::robot::RobotControllerDescription buildDescriptionFromJoints(
+      const std::vector<hardware_interface::ComponentInfo>& joints,
+      const std::unordered_map<std::string, std::string>& hw_params);
 
 private:
   // EGM

@@ -62,50 +62,9 @@ CallbackReturn ABBSystemHardware::on_init(const hardware_interface::HardwareInfo
   }
   else
   {
-    // Build a minimal RobotControllerDescription from URDF info.
-    RCLCPP_INFO(LOGGER, "configure_via_rws=false: building controller description from URDF");
-
-    // RobotWare version (default 7.0 if not specified)
-    const auto rw_it = info_.hardware_parameters.find("robotware_version");
-    std::string rw_str = (rw_it != info_.hardware_parameters.end()) ? rw_it->second : "7.0";
-    int rw_major = 7, rw_minor = 0, rw_patch = 0;
-    sscanf(rw_str.c_str(), "%d.%d.%d", &rw_major, &rw_minor, &rw_patch);
-
-    auto* header = robot_controller_description_.mutable_header();
-    auto* rw_version = header->mutable_robot_ware_version();
-    rw_version->set_name(rw_str);
-    rw_version->set_major_number(rw_major);
-    rw_version->set_minor_number(rw_minor);
-    rw_version->set_patch_number(rw_patch);
-
-    auto* indicators = robot_controller_description_.mutable_system_indicators();
-    indicators->mutable_options()->set_egm(true);
-
-    // Single mechanical unit group — name empty so the EGM port lookup
-    // (group.name() + "egm_port") resolves to just "egm_port".
-    auto* group = robot_controller_description_.add_mechanical_units_groups();
-    group->set_name("");
-
-    auto* robot = group->mutable_robot();
-    robot->set_name("ROB_1");
-    robot->set_type(abb::robot::MechanicalUnit_Type_TCP_ROBOT);
-    robot->set_axes(static_cast<int>(info_.joints.size()));
-    robot->set_axes_total(static_cast<int>(info_.joints.size()));
-    robot->set_mode(abb::robot::MechanicalUnit_Mode_ACTIVATED);
-
-    for (const auto& joint : info_.joints)
-    {
-      auto* sj = robot->add_standardized_joints();
-      sj->set_original_name(joint.name);
-      sj->set_standardized_name(joint.name);
-      sj->set_rotating_move(true);
-      // Wide bounds — actual joint limits are enforced by URDF/controller.
-      sj->set_lower_joint_bound(-2.0 * M_PI);
-      sj->set_upper_joint_bound(2.0 * M_PI);
-    }
-
-    RCLCPP_INFO_STREAM(LOGGER, "Built controller description with " << info_.joints.size()
-                                                                     << " joints, RobotWare " << rw_str);
+    robot_controller_description_ = buildDescriptionFromJoints(info_.joints, info_.hardware_parameters);
+    RCLCPP_INFO_STREAM(LOGGER, "configure_via_rws=false: built description with "
+                                   << info_.joints.size() << " joints");
   }
 
   for (const hardware_interface::ComponentInfo& joint : info_.joints)
@@ -286,6 +245,54 @@ return_type ABBSystemHardware::write(const rclcpp::Time& time, const rclcpp::Dur
 {
   egm_manager_->write(motion_data_);
   return return_type::OK;
+}
+
+abb::robot::RobotControllerDescription ABBSystemHardware::buildDescriptionFromJoints(
+    const std::vector<hardware_interface::ComponentInfo>& joints,
+    const std::unordered_map<std::string, std::string>& hw_params)
+{
+  abb::robot::RobotControllerDescription desc;
+
+  // RobotWare version (default 7.0 if not specified)
+  const auto rw_it = hw_params.find("robotware_version");
+  std::string rw_str = (rw_it != hw_params.end()) ? rw_it->second : "7.0";
+  int rw_major = 7, rw_minor = 0, rw_patch = 0;
+  sscanf(rw_str.c_str(), "%d.%d.%d", &rw_major, &rw_minor, &rw_patch);
+
+  auto* header = desc.mutable_header();
+  auto* rw_version = header->mutable_robot_ware_version();
+  rw_version->set_name(rw_str);
+  rw_version->set_major_number(rw_major);
+  rw_version->set_minor_number(rw_minor);
+  rw_version->set_patch_number(rw_patch);
+
+  auto* indicators = desc.mutable_system_indicators();
+  indicators->mutable_options()->set_egm(true);
+
+  // Single mechanical unit group — name empty so the EGM port lookup
+  // (group.name() + "egm_port") resolves to just "egm_port".
+  auto* group = desc.add_mechanical_units_groups();
+  group->set_name("");
+
+  auto* robot = group->mutable_robot();
+  robot->set_name("ROB_1");
+  robot->set_type(abb::robot::MechanicalUnit_Type_TCP_ROBOT);
+  robot->set_axes(static_cast<int>(joints.size()));
+  robot->set_axes_total(static_cast<int>(joints.size()));
+  robot->set_mode(abb::robot::MechanicalUnit_Mode_ACTIVATED);
+
+  for (const auto& joint : joints)
+  {
+    auto* sj = robot->add_standardized_joints();
+    sj->set_original_name(joint.name);
+    sj->set_standardized_name(joint.name);
+    sj->set_rotating_move(true);
+    // Wide bounds — actual joint limits are enforced by URDF/controller.
+    sj->set_lower_joint_bound(-2.0 * M_PI);
+    sj->set_upper_joint_bound(2.0 * M_PI);
+  }
+
+  return desc;
 }
 
 }  // namespace abb_hardware_interface
