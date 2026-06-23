@@ -28,3 +28,20 @@ TEST(BuildDescription, SingleGroupWhenNoMechanicalUnitParam) {
   EXPECT_EQ(desc.mechanical_units_groups(0).name(), "");
   EXPECT_EQ(desc.mechanical_units_groups(0).robot().standardized_joints_size(), 3);
 }
+
+TEST(BuildDescription, TwoGroupsArmRobotPlusExternalSingle) {
+  std::vector<hardware_interface::ComponentInfo> joints{
+    joint("joint_1", {{"mechanical_unit","rob1"}}),
+    joint("joint_2", {{"mechanical_unit","rob1"}}),
+    joint("ext_joint_1", {{"mechanical_unit","extax"},{"mechanical_unit_type","single"}})};
+  auto d = abb_hardware_interface::ABBSystemHardware::buildDescriptionFromJoints(joints, {});
+  ASSERT_EQ(d.mechanical_units_groups_size(), 2);
+  EXPECT_EQ(d.mechanical_units_groups(0).name(), "rob1");
+  EXPECT_TRUE(d.mechanical_units_groups(0).has_robot());
+  EXPECT_EQ(d.mechanical_units_groups(0).robot().standardized_joints_size(), 2);
+  EXPECT_EQ(d.mechanical_units_groups(1).name(), "extax");
+  EXPECT_FALSE(d.mechanical_units_groups(1).has_robot());
+  ASSERT_EQ(d.mechanical_units_groups(1).mechanical_units_size(), 1);
+  EXPECT_EQ(d.mechanical_units_groups(1).mechanical_units(0).type(), abb::robot::MechanicalUnit_Type_SINGLE);
+  EXPECT_EQ(d.mechanical_units_groups(1).mechanical_units(0).standardized_joints(0).standardized_name(), "ext_joint_1");
+}

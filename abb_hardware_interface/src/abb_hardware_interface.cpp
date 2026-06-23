@@ -269,27 +269,82 @@ abb::robot::RobotControllerDescription ABBSystemHardware::buildDescriptionFromJo
   auto* indicators = desc.mutable_system_indicators();
   indicators->mutable_options()->set_egm(true);
 
-  // Single mechanical unit group — name empty so the EGM port lookup
-  // (group.name() + "egm_port") resolves to just "egm_port".
-  auto* group = desc.add_mechanical_units_groups();
-  group->set_name("");
-
-  auto* robot = group->mutable_robot();
-  robot->set_name("ROB_1");
-  robot->set_type(abb::robot::MechanicalUnit_Type_TCP_ROBOT);
-  robot->set_axes(static_cast<int>(joints.size()));
-  robot->set_axes_total(static_cast<int>(joints.size()));
-  robot->set_mode(abb::robot::MechanicalUnit_Mode_ACTIVATED);
-
-  for (const auto& joint : joints)
+  // Partition joints by their "mechanical_unit" param, preserving first-seen order.
+  // Joints without the param all land in the "" (empty-name) group, which
+  // resolves the EGM port key to just "egm_port" — same as the original single-group path.
+  std::vector<std::string> group_order;
+  std::map<std::string, std::vector<const hardware_interface::ComponentInfo*>> buckets;
+  for (const auto& j : joints)
   {
-    auto* sj = robot->add_standardized_joints();
-    sj->set_original_name(joint.name);
-    sj->set_standardized_name(joint.name);
-    sj->set_rotating_move(true);
-    // Wide bounds — actual joint limits are enforced by URDF/controller.
-    sj->set_lower_joint_bound(-2.0 * M_PI);
-    sj->set_upper_joint_bound(2.0 * M_PI);
+    auto it = j.parameters.find("mechanical_unit");
+    std::string g = (it != j.parameters.end()) ? it->second : "";
+    if (!buckets.count(g)) group_order.push_back(g);
+    buckets[g].push_back(&j);
+  }
+
+  for (const auto& gname : group_order)
+  {
+    auto* group = desc.add_mechanical_units_groups();
+    group->set_name(gname);
+
+    // Determine whether this group contains external-axis joints.
+    // A group is treated as external when ALL its joints carry
+    // mechanical_unit_type=single. A mixed group (robot + single) is
+    // not supported by this implementation.
+    bool is_external = false;
+    {
+      const auto& gjts = buckets[gname];
+      if (!gjts.empty())
+      {
+        auto type_it = gjts[0]->parameters.find("mechanical_unit_type");
+        is_external = (type_it != gjts[0]->parameters.end() &&
+                       type_it->second == "single");
+      }
+    }
+
+    if (is_external)
+    {
+      // External-axis group: each joint → its own MechanicalUnit of type SINGLE.
+      // Do NOT set group->robot() — leaving it absent causes Channel::Channel()
+      // to set axes=None (correct for pure external-axis groups).
+      for (const auto* j : buckets[gname])
+      {
+        auto* unit = group->add_mechanical_units();
+        unit->set_name(j->name);
+        unit->set_type(abb::robot::MechanicalUnit_Type_SINGLE);
+        unit->set_axes(1);
+        unit->set_axes_total(1);
+        unit->set_mode(abb::robot::MechanicalUnit_Mode_ACTIVATED);
+
+        auto* sj = unit->add_standardized_joints();
+        sj->set_original_name(j->name);
+        sj->set_standardized_name(j->name);
+        sj->set_rotating_move(true);
+        sj->set_lower_joint_bound(-2.0 * M_PI);
+        sj->set_upper_joint_bound(2.0 * M_PI);
+      }
+    }
+    else
+    {
+      // TCP robot group: all joints belong to one robot unit.
+      auto* robot = group->mutable_robot();
+      robot->set_name("ROB_1");
+      robot->set_type(abb::robot::MechanicalUnit_Type_TCP_ROBOT);
+      robot->set_axes(static_cast<int>(buckets[gname].size()));
+      robot->set_axes_total(static_cast<int>(buckets[gname].size()));
+      robot->set_mode(abb::robot::MechanicalUnit_Mode_ACTIVATED);
+
+      for (const auto* j : buckets[gname])
+      {
+        auto* sj = robot->add_standardized_joints();
+        sj->set_original_name(j->name);
+        sj->set_standardized_name(j->name);
+        sj->set_rotating_move(true);
+        // Wide bounds — actual joint limits are enforced by URDF/controller.
+        sj->set_lower_joint_bound(-2.0 * M_PI);
+        sj->set_upper_joint_bound(2.0 * M_PI);
+      }
+    }
   }
 
   return desc;
