@@ -96,16 +96,11 @@ namespace abb_hardware_interface {
       abb::robot::SystemStateData system_state_data_;
       rws_manager.collectAndUpdateRuntimeData(system_state_data_, motion_data_);
 
-      // Store the raw J3 position before applying coupling
+      // Apply coupling for the initial state (RWS runtime data is raw)
       if (j23_coupling_) {
-        raw_j3_position_ = motion_data_.groups[0].units[0].joints.at(2).state.position;
-        raw_j3_velocity_ = motion_data_.groups[0].units[0].joints.at(2).state.velocity;
-
-        // Apply coupling for the initial state
-        motion_data_.groups[0].units[0].joints.at(2).state.position =
-            raw_j3_position_ + J23_factor * motion_data_.groups[0].units[0].joints.at(1).state.position;
-        motion_data_.groups[0].units[0].joints.at(2).state.velocity =
-            raw_j3_velocity_ + J23_factor * motion_data_.groups[0].units[0].joints.at(1).state.velocity;
+        auto &joints = motion_data_.groups[0].units[0].joints;
+        joints.at(2).state.position += J23_factor * joints.at(1).state.position;
+        joints.at(2).state.velocity += J23_factor * joints.at(1).state.velocity;
       }
 
       for (uint i = 0; i < motion_data_.groups.size(); i++) {
@@ -119,8 +114,23 @@ namespace abb_hardware_interface {
       }
       last_positions_ = std::vector<double>(motion_data_.groups[0].units[0].joints.size(),
                                             std::numeric_limits<double>::quiet_NaN());
-      raw_j3_position_ = std::numeric_limits<double>::quiet_NaN();
-      raw_j3_velocity_ = std::numeric_limits<double>::quiet_NaN();
+
+      // Seed the exported ros2_control buffers (fixed size from here on:
+      // the exported interfaces hold pointers into these vectors).
+      exported_state_positions_.clear();
+      exported_state_velocities_.clear();
+      exported_cmd_positions_.clear();
+      exported_cmd_velocities_.clear();
+      for (const auto &group: motion_data_.groups) {
+        for (const auto &unit: group.units) {
+          for (const auto &joint: unit.joints) {
+            exported_state_positions_.push_back(joint.state.position);
+            exported_state_velocities_.push_back(joint.state.velocity);
+            exported_cmd_positions_.push_back(joint.command.position);
+            exported_cmd_velocities_.push_back(joint.command.velocity);
+          }
+        }
+      }
     } catch (...) {
       RCLCPP_ERROR_STREAM(LOGGER, "Failed to initialize motion data from robot controller description");
       return CallbackReturn::ERROR;
@@ -154,6 +164,7 @@ namespace abb_hardware_interface {
 
   std::vector<hardware_interface::StateInterface> ABBSystemHardware::export_state_interfaces() {
     std::vector<hardware_interface::StateInterface> state_interfaces;
+    size_t idx = 0;
     for (auto &group: motion_data_.groups) {
       for (auto &unit: group.units) {
         for (auto &joint: unit.joints) {
@@ -164,8 +175,11 @@ namespace abb_hardware_interface {
           if (group.name == "extax") {
             joint_name = "ext_" + joint.name.substr(pos);
           }
-          state_interfaces.emplace_back(joint_name, hardware_interface::HW_IF_POSITION, &joint.state.position);
-          state_interfaces.emplace_back(joint_name, hardware_interface::HW_IF_VELOCITY, &joint.state.velocity);
+          state_interfaces.emplace_back(joint_name, hardware_interface::HW_IF_POSITION,
+                                        &exported_state_positions_[idx]);
+          state_interfaces.emplace_back(joint_name, hardware_interface::HW_IF_VELOCITY,
+                                        &exported_state_velocities_[idx]);
+          ++idx;
         }
       }
     }
@@ -181,6 +195,7 @@ namespace abb_hardware_interface {
 
   std::vector<hardware_interface::CommandInterface> ABBSystemHardware::export_command_interfaces() {
     std::vector<hardware_interface::CommandInterface> command_interfaces;
+    size_t idx = 0;
     for (auto &group: motion_data_.groups) {
       for (auto &unit: group.units) {
         for (auto &joint: unit.joints) {
@@ -191,8 +206,11 @@ namespace abb_hardware_interface {
           if (group.name == "extax") {
             joint_name = "ext_" + joint.name.substr(pos);
           }
-          command_interfaces.emplace_back(joint_name, hardware_interface::HW_IF_POSITION, &joint.command.position);
-          command_interfaces.emplace_back(joint_name, hardware_interface::HW_IF_VELOCITY, &joint.command.velocity);
+          command_interfaces.emplace_back(joint_name, hardware_interface::HW_IF_POSITION,
+                                          &exported_cmd_positions_[idx]);
+          command_interfaces.emplace_back(joint_name, hardware_interface::HW_IF_VELOCITY,
+                                          &exported_cmd_velocities_[idx]);
+          ++idx;
         }
       }
     }
@@ -218,12 +236,11 @@ namespace abb_hardware_interface {
       rclcpp::sleep_for(500ms);
     }
 
-    egm_manager_->read(motion_data_);
-
-    // Re-synchronize raw J3 position when connection is established
-    if (j23_coupling_) {
-      raw_j3_position_ = motion_data_.groups[0].units[0].joints.at(2).state.position;
-      raw_j3_velocity_ = motion_data_.groups[0].units[0].joints.at(2).state.velocity;
+    // Only refresh the exported states when the read delivered fresh (raw)
+    // feedback; on a miss the states still hold the already-coupled init
+    // values and re-applying the coupling would corrupt them.
+    if (egm_manager_->read(motion_data_)) {
+      applyCouplingAndExportStates();
     }
 
     RCLCPP_INFO(LOGGER, "ros2_control hardware interface was successfully started!");
@@ -246,14 +263,11 @@ namespace abb_hardware_interface {
     // Check if we just regained connection
     if (!was_connected && egm_connected_) {
       RCLCPP_DEBUG(LOGGER, "EGM connection restored");
-      // Re-sync raw J3 values when connection is restored
-      if (j23_coupling_) {
-        raw_j3_position_ = motion_data_.groups[0].units[0].joints.at(2).state.position;
-        raw_j3_velocity_ = motion_data_.groups[0].units[0].joints.at(2).state.velocity;
-      }
     }
 
-    // Only update values if connected
+    // Only update values if connected. A successful read rewrote the
+    // wire-side states with fresh raw feedback, so the coupling can be
+    // folded in before the copy to the exported buffers.
     if (egm_connected_) {
       // Update force/torque measurements
       for (int i = 0; i < motion_data_.groups[0].egm_channel_data.input.mutable_measuredforce()->force_size(); i++) {
@@ -261,22 +275,32 @@ namespace abb_hardware_interface {
             force(i);
       }
 
-      // Apply J2-J3 coupling correctly
-      if (j23_coupling_) {
-        // Store the raw (uncoupled) J3 values
-        raw_j3_position_ = motion_data_.groups[0].units[0].joints.at(2).state.position;
-        raw_j3_velocity_ = motion_data_.groups[0].units[0].joints.at(2).state.velocity;
-
-        // Apply coupling by setting (not adding to) the coupled position
-        motion_data_.groups[0].units[0].joints.at(2).state.position =
-            raw_j3_position_ + J23_factor * motion_data_.groups[0].units[0].joints.at(1).state.position;
-        motion_data_.groups[0].units[0].joints.at(2).state.velocity =
-            raw_j3_velocity_ + J23_factor * motion_data_.groups[0].units[0].joints.at(1).state.velocity;
-      }
+      applyCouplingAndExportStates();
     }
-    // else: keep last valid values when disconnected
+    // else: keep last exported values when disconnected
 
     return return_type::OK;
+  }
+
+  void ABBSystemHardware::applyCouplingAndExportStates() {
+    // Wire-side J3 holds raw EGM feedback at this point; fold in the J2
+    // coupling before anything outside this class can see the value.
+    if (j23_coupling_) {
+      auto &joints = motion_data_.groups[0].units[0].joints;
+      joints.at(2).state.position += J23_factor * joints.at(1).state.position;
+      joints.at(2).state.velocity += J23_factor * joints.at(1).state.velocity;
+    }
+
+    size_t idx = 0;
+    for (const auto &group: motion_data_.groups) {
+      for (const auto &unit: group.units) {
+        for (const auto &joint: unit.joints) {
+          exported_state_positions_[idx] = joint.state.position;
+          exported_state_velocities_[idx] = joint.state.velocity;
+          ++idx;
+        }
+      }
+    }
   }
 
   return_type ABBSystemHardware::write(const rclcpp::Time &time, const rclcpp::Duration &period) {
@@ -285,25 +309,29 @@ namespace abb_hardware_interface {
       return return_type::OK; // Skip writing when disconnected
     }
 
-    if (j23_coupling_) {
-      // Store the commanded coupled position
-      double coupled_j3_cmd_pos = motion_data_.groups[0].units[0].joints.at(2).command.position;
-      double coupled_j3_cmd_vel = motion_data_.groups[0].units[0].joints.at(2).command.velocity;
-
-      // Convert to raw (uncoupled) position for the robot
-      motion_data_.groups[0].units[0].joints.at(2).command.position =
-          coupled_j3_cmd_pos - J23_factor * motion_data_.groups[0].units[0].joints.at(1).command.position;
-      motion_data_.groups[0].units[0].joints.at(2).command.velocity =
-          coupled_j3_cmd_vel - J23_factor * motion_data_.groups[0].units[0].joints.at(1).command.velocity;
-
-      egm_manager_->write(motion_data_);
-
-      // Restore the coupled values for internal state consistency
-      motion_data_.groups[0].units[0].joints.at(2).command.position = coupled_j3_cmd_pos;
-      motion_data_.groups[0].units[0].joints.at(2).command.velocity = coupled_j3_cmd_vel;
-    } else {
-      egm_manager_->write(motion_data_);
+    // Copy the exported commands onto the wire-side data, then convert J3 to
+    // the raw (uncoupled) value the robot expects. The raw value only ever
+    // exists in motion_data_, which controllers cannot see, so there is no
+    // window where a concurrent reader of the command interfaces can catch
+    // an uncoupled J3.
+    size_t idx = 0;
+    for (auto &group: motion_data_.groups) {
+      for (auto &unit: group.units) {
+        for (auto &joint: unit.joints) {
+          joint.command.position = exported_cmd_positions_[idx];
+          joint.command.velocity = exported_cmd_velocities_[idx];
+          ++idx;
+        }
+      }
     }
+
+    if (j23_coupling_) {
+      auto &joints = motion_data_.groups[0].units[0].joints;
+      joints.at(2).command.position -= J23_factor * joints.at(1).command.position;
+      joints.at(2).command.velocity -= J23_factor * joints.at(1).command.velocity;
+    }
+
+    egm_manager_->write(motion_data_);
 
     return return_type::OK;
   }

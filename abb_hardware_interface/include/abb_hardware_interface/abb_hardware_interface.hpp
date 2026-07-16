@@ -73,14 +73,26 @@ private:
   std::vector<double> urcl_ft_sensor_measurements_;
   abb::robot::MotionData motion_data_;
 
+  // Exported ros2_control buffers, decoupled from the EGM wire-side data in
+  // motion_data_. Controllers and non-RT readers (e.g. a trajectory
+  // controller's goal callback sampling hold positions for a partial goal)
+  // only ever see these buffers. The J2-J3 coupling transforms happen in the
+  // copy between the two, so a raw (uncoupled) J3 value is never observable
+  // outside this class; transforming motion_data_ in place would open a
+  // window a concurrent reader can catch mid-transform.
+  std::vector<double> exported_state_positions_;
+  std::vector<double> exported_state_velocities_;
+  std::vector<double> exported_cmd_positions_;
+  std::vector<double> exported_cmd_velocities_;
+
+  /// Fold the J2-J3 coupling into the wire-side joint states (which must be
+  /// fresh, raw EGM feedback) and copy all joint states into the exported
+  /// buffers.
+  void applyCouplingAndExportStates();
+
   // J2-J3 coupling parameters
   bool j23_coupling_ = false;
   double J23_factor = -1.0;
-
-  // Store raw (uncoupled) J3 position and velocity
-  // These are the actual values from the robot without coupling applied
-  double raw_j3_position_ = 0.0;
-  double raw_j3_velocity_ = 0.0;
 
   // Track EGM connection state
   bool egm_connected_ = false;
