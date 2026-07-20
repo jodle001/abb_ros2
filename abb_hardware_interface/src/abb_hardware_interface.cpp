@@ -23,8 +23,9 @@ namespace abb_hardware_interface {
   static constexpr size_t NUM_CONNECTION_TRIES = 100;
   static const rclcpp::Logger LOGGER = rclcpp::get_logger("ABBSystemHardware");
 
-  CallbackReturn ABBSystemHardware::on_init(const hardware_interface::HardwareInfo &info) {
-    if (hardware_interface::SystemInterface::on_init(info) != CallbackReturn::SUCCESS) {
+  CallbackReturn ABBSystemHardware::on_init(
+      const hardware_interface::HardwareComponentInterfaceParams &params) {
+    if (hardware_interface::SystemInterface::on_init(params) != CallbackReturn::SUCCESS) {
       return CallbackReturn::ERROR;
     }
 
@@ -96,13 +97,9 @@ namespace abb_hardware_interface {
       abb::robot::SystemStateData system_state_data_;
       rws_manager.collectAndUpdateRuntimeData(system_state_data_, motion_data_);
 
-      // Apply coupling for the initial state (RWS runtime data is raw)
-      if (j23_coupling_) {
-        auto &joints = motion_data_.groups[0].units[0].joints;
-        joints.at(2).state.position += J23_factor * joints.at(1).state.position;
-        joints.at(2).state.velocity += J23_factor * joints.at(1).state.velocity;
-      }
-
+      // Wire-side states in motion_data_ stay RAW for the lifetime of this
+      // object; the J2-J3 coupling is folded in only during the copy to the
+      // framework state interfaces (see applyCouplingAndSetStates).
       for (uint i = 0; i < motion_data_.groups.size(); i++) {
         for (uint pp = 0; pp < motion_data_.groups[i].units.size(); pp++) {
           for (uint k = 0; k < motion_data_.groups[i].units[pp].joints.size(); k++) {
@@ -115,20 +112,31 @@ namespace abb_hardware_interface {
       last_positions_ = std::vector<double>(motion_data_.groups[0].units[0].joints.size(),
                                             std::numeric_limits<double>::quiet_NaN());
 
-      // Seed the exported ros2_control buffers (fixed size from here on:
-      // the exported interfaces hold pointers into these vectors).
-      exported_state_positions_.clear();
-      exported_state_velocities_.clear();
-      exported_cmd_positions_.clear();
-      exported_cmd_velocities_.clear();
+      // Derive the ros2_control joint name for every wire-side joint (strip
+      // the ABB prefix; extax joints get an ext_ prefix) and validate the set
+      // against the URDF, so a mismatch fails here instead of as unclaimable
+      // interfaces later.
+      joint_names_.clear();
       for (const auto &group: motion_data_.groups) {
         for (const auto &unit: group.units) {
           for (const auto &joint: unit.joints) {
-            exported_state_positions_.push_back(joint.state.position);
-            exported_state_velocities_.push_back(joint.state.velocity);
-            exported_cmd_positions_.push_back(joint.command.position);
-            exported_cmd_velocities_.push_back(joint.command.velocity);
+            const auto pos = joint.name.find("joint");
+            auto joint_name = joint.name.substr(pos);
+            if (group.name == "extax") {
+              joint_name = "ext_" + joint.name.substr(pos);
+            }
+            joint_names_.push_back(joint_name);
           }
+        }
+      }
+      for (const auto &name: joint_names_) {
+        const bool in_urdf =
+            std::any_of(info_.joints.begin(), info_.joints.end(),
+                        [&](const hardware_interface::ComponentInfo &j) { return j.name == name; });
+        if (!in_urdf) {
+          RCLCPP_FATAL(LOGGER, "Joint '%s' reported by the robot controller is not in the ros2_control URDF",
+                       name.c_str());
+          return CallbackReturn::ERROR;
         }
       }
     } catch (...) {
@@ -162,62 +170,6 @@ namespace abb_hardware_interface {
     return CallbackReturn::SUCCESS;
   }
 
-  std::vector<hardware_interface::StateInterface> ABBSystemHardware::export_state_interfaces() {
-    std::vector<hardware_interface::StateInterface> state_interfaces;
-    size_t idx = 0;
-    for (auto &group: motion_data_.groups) {
-      for (auto &unit: group.units) {
-        for (auto &joint: unit.joints) {
-          // TODO(seng): Consider changing joint names in robot description to match what comes
-          // from the ABB robot description to avoid needing to strip the prefix here
-          const auto pos = joint.name.find("joint");
-          auto joint_name = joint.name.substr(pos);
-          if (group.name == "extax") {
-            joint_name = "ext_" + joint.name.substr(pos);
-          }
-          state_interfaces.emplace_back(joint_name, hardware_interface::HW_IF_POSITION,
-                                        &exported_state_positions_[idx]);
-          state_interfaces.emplace_back(joint_name, hardware_interface::HW_IF_VELOCITY,
-                                        &exported_state_velocities_[idx]);
-          ++idx;
-        }
-      }
-    }
-
-    for (auto &sensor: info_.sensors) {
-      for (uint j = 0; j < sensor.state_interfaces.size(); j++) {
-        state_interfaces.emplace_back(sensor.name, sensor.state_interfaces[j].name, &urcl_ft_sensor_measurements_[j]);
-      }
-    }
-
-    return state_interfaces;
-  }
-
-  std::vector<hardware_interface::CommandInterface> ABBSystemHardware::export_command_interfaces() {
-    std::vector<hardware_interface::CommandInterface> command_interfaces;
-    size_t idx = 0;
-    for (auto &group: motion_data_.groups) {
-      for (auto &unit: group.units) {
-        for (auto &joint: unit.joints) {
-          // TODO(seng): Consider changing joint names in robot description to match what comes
-          // from the ABB robot description to avoid needing to strip the prefix here
-          const auto pos = joint.name.find("joint");
-          auto joint_name = joint.name.substr(pos);
-          if (group.name == "extax") {
-            joint_name = "ext_" + joint.name.substr(pos);
-          }
-          command_interfaces.emplace_back(joint_name, hardware_interface::HW_IF_POSITION,
-                                          &exported_cmd_positions_[idx]);
-          command_interfaces.emplace_back(joint_name, hardware_interface::HW_IF_VELOCITY,
-                                          &exported_cmd_velocities_[idx]);
-          ++idx;
-        }
-      }
-    }
-
-    return command_interfaces;
-  }
-
   CallbackReturn ABBSystemHardware::on_activate(const rclcpp_lifecycle::State & /* previous_state */) {
     size_t counter = 0;
     RCLCPP_INFO(LOGGER, "Connecting to robot...");
@@ -236,11 +188,16 @@ namespace abb_hardware_interface {
       rclcpp::sleep_for(500ms);
     }
 
-    // Only refresh the exported states when the read delivered fresh (raw)
-    // feedback; on a miss the states still hold the already-coupled init
-    // values and re-applying the coupling would corrupt them.
-    if (egm_manager_->read(motion_data_)) {
-      applyCouplingAndExportStates();
+    // The export transform is idempotent, so a missed read simply re-exports
+    // the init-seeded values.
+    egm_manager_->read(motion_data_);
+    applyCouplingAndSetStates();
+
+    // Commands start at the coupled states so the first write holds position.
+    for (const auto &name: joint_names_) {
+      set_command(name + "/" + hardware_interface::HW_IF_POSITION,
+                  get_state(name + "/" + hardware_interface::HW_IF_POSITION));
+      set_command(name + "/" + hardware_interface::HW_IF_VELOCITY, 0.0);
     }
 
     RCLCPP_INFO(LOGGER, "ros2_control hardware interface was successfully started!");
@@ -265,38 +222,45 @@ namespace abb_hardware_interface {
       RCLCPP_DEBUG(LOGGER, "EGM connection restored");
     }
 
-    // Only update values if connected. A successful read rewrote the
-    // wire-side states with fresh raw feedback, so the coupling can be
-    // folded in before the copy to the exported buffers.
+    // Only update values if connected.
     if (egm_connected_) {
       // Update force/torque measurements
       for (int i = 0; i < motion_data_.groups[0].egm_channel_data.input.mutable_measuredforce()->force_size(); i++) {
         urcl_ft_sensor_measurements_[i] = motion_data_.groups[0].egm_channel_data.input.mutable_measuredforce()->
             force(i);
       }
+      for (const auto &sensor: info_.sensors) {
+        for (uint j = 0; j < sensor.state_interfaces.size(); j++) {
+          set_state(sensor.name + "/" + sensor.state_interfaces[j].name, urcl_ft_sensor_measurements_[j]);
+        }
+      }
 
-      applyCouplingAndExportStates();
+      applyCouplingAndSetStates();
     }
     // else: keep last exported values when disconnected
 
     return return_type::OK;
   }
 
-  void ABBSystemHardware::applyCouplingAndExportStates() {
-    // Wire-side J3 holds raw EGM feedback at this point; fold in the J2
-    // coupling before anything outside this class can see the value.
-    if (j23_coupling_) {
-      auto &joints = motion_data_.groups[0].units[0].joints;
-      joints.at(2).state.position += J23_factor * joints.at(1).state.position;
-      joints.at(2).state.velocity += J23_factor * joints.at(1).state.velocity;
-    }
-
+  void ABBSystemHardware::applyCouplingAndSetStates() {
+    // The wire-side states stay raw; the J2-J3 coupling is folded into the
+    // copied-out value only. This makes the transform idempotent: re-running
+    // it on unchanged (stale) wire data recomputes the same exported values,
+    // so a coupled value can never be re-coupled and wind up.
     size_t idx = 0;
-    for (const auto &group: motion_data_.groups) {
-      for (const auto &unit: group.units) {
-        for (const auto &joint: unit.joints) {
-          exported_state_positions_[idx] = joint.state.position;
-          exported_state_velocities_[idx] = joint.state.velocity;
+    for (size_t g = 0; g < motion_data_.groups.size(); ++g) {
+      auto &units = motion_data_.groups[g].units;
+      for (size_t u = 0; u < units.size(); ++u) {
+        auto &joints = units[u].joints;
+        for (size_t k = 0; k < joints.size(); ++k) {
+          double pos = joints[k].state.position;
+          double vel = joints[k].state.velocity;
+          if (j23_coupling_ && g == 0 && u == 0 && k == 2) {
+            pos += J23_factor * joints[1].state.position;
+            vel += J23_factor * joints[1].state.velocity;
+          }
+          set_state(joint_names_[idx] + "/" + hardware_interface::HW_IF_POSITION, pos);
+          set_state(joint_names_[idx] + "/" + hardware_interface::HW_IF_VELOCITY, vel);
           ++idx;
         }
       }
@@ -309,17 +273,17 @@ namespace abb_hardware_interface {
       return return_type::OK; // Skip writing when disconnected
     }
 
-    // Copy the exported commands onto the wire-side data, then convert J3 to
-    // the raw (uncoupled) value the robot expects. The raw value only ever
-    // exists in motion_data_, which controllers cannot see, so there is no
-    // window where a concurrent reader of the command interfaces can catch
-    // an uncoupled J3.
+    // Copy the framework command interfaces onto the wire-side data, then
+    // convert J3 to the raw (uncoupled) value the robot expects. The raw
+    // value only ever exists in motion_data_, which controllers cannot see,
+    // so there is no window where a concurrent reader of the command
+    // interfaces can catch an uncoupled J3.
     size_t idx = 0;
     for (auto &group: motion_data_.groups) {
       for (auto &unit: group.units) {
         for (auto &joint: unit.joints) {
-          joint.command.position = exported_cmd_positions_[idx];
-          joint.command.velocity = exported_cmd_velocities_[idx];
+          joint.command.position = get_command(joint_names_[idx] + "/" + hardware_interface::HW_IF_POSITION);
+          joint.command.velocity = get_command(joint_names_[idx] + "/" + hardware_interface::HW_IF_VELOCITY);
           ++idx;
         }
       }

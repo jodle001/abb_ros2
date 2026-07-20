@@ -41,19 +41,16 @@ using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface
 
 namespace abb_hardware_interface
 {
+// ros2_control 4.x style: interfaces are created by the framework from the
+// URDF; read()/write() move values between the framework storage and the EGM
+// wire-side data by interface name.
 class ABBSystemHardware : public hardware_interface::SystemInterface
 {
 public:
   RCLCPP_SHARED_PTR_DEFINITIONS(ABBSystemHardware)
 
   ROS2_CONTROL_DRIVER_PUBLIC
-  CallbackReturn on_init(const hardware_interface::HardwareInfo& info) override;
-
-  ROS2_CONTROL_DRIVER_PUBLIC
-  std::vector<hardware_interface::StateInterface> export_state_interfaces() override;
-
-  ROS2_CONTROL_DRIVER_PUBLIC
-  std::vector<hardware_interface::CommandInterface> export_command_interfaces() override;
+  CallbackReturn on_init(const hardware_interface::HardwareComponentInterfaceParams& params) override;
 
   ROS2_CONTROL_DRIVER_PUBLIC
   CallbackReturn on_activate(const rclcpp_lifecycle::State& previous_state) override;
@@ -73,22 +70,17 @@ private:
   std::vector<double> urcl_ft_sensor_measurements_;
   abb::robot::MotionData motion_data_;
 
-  // Exported ros2_control buffers, decoupled from the EGM wire-side data in
-  // motion_data_. Controllers and non-RT readers (e.g. a trajectory
-  // controller's goal callback sampling hold positions for a partial goal)
-  // only ever see these buffers. The J2-J3 coupling transforms happen in the
-  // copy between the two, so a raw (uncoupled) J3 value is never observable
-  // outside this class; transforming motion_data_ in place would open a
-  // window a concurrent reader can catch mid-transform.
-  std::vector<double> exported_state_positions_;
-  std::vector<double> exported_state_velocities_;
-  std::vector<double> exported_cmd_positions_;
-  std::vector<double> exported_cmd_velocities_;
+  // ros2_control interface names per wire-side joint, in motion_data_
+  // traversal order (groups -> units -> joints). Derived once in on_init from
+  // the ABB controller description and validated against the URDF joints.
+  std::vector<std::string> joint_names_;
 
-  /// Fold the J2-J3 coupling into the wire-side joint states (which must be
-  /// fresh, raw EGM feedback) and copy all joint states into the exported
-  /// buffers.
-  void applyCouplingAndExportStates();
+  /// Copy all wire-side joint states into the framework state interfaces,
+  /// folding the J2-J3 coupling into the copied-out values. The wire-side
+  /// states are never mutated, so the transform is idempotent regardless of
+  /// whether the wire data is fresh, and a raw (uncoupled) J3 value is never
+  /// observable outside this class.
+  void applyCouplingAndSetStates();
 
   // J2-J3 coupling parameters
   bool j23_coupling_ = false;
