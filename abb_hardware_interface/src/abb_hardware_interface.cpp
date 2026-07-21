@@ -34,7 +34,7 @@ namespace abb_hardware_interface {
     const auto is_coupled = info_.hardware_parameters["j23_coupling"];
     j23_coupling_ = is_coupled == "true";
 
-    RCLCPP_WARN_STREAM(LOGGER, "j 2-3 Coupling: " << j23_coupling_);
+    RCLCPP_INFO_STREAM(LOGGER, "J2-J3 coupling: " << (j23_coupling_ ? "on" : "off"));
 
     if (rws_ip == "None") {
       RCLCPP_FATAL(LOGGER, "RWS IP not specified");
