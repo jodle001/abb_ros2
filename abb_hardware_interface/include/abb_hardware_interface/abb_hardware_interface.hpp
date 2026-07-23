@@ -88,6 +88,8 @@ private:
 
   // Track EGM connection state
   bool egm_connected_ = false;
+  // URDF declares the egm/connected gpio; exported every read cycle.
+  bool has_egm_gpio_ = false;
   std::vector<double> last_positions_;
   int unchanged_count_ = 0;
 };

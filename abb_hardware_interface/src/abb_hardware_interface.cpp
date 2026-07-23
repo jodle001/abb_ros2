@@ -88,6 +88,20 @@ namespace abb_hardware_interface {
 
     urcl_ft_sensor_measurements_.resize(6);
 
+    // Optional egm/connected gpio: when the URDF declares it, the connection
+    // flag is exported as a state interface every read cycle so controllers
+    // (the force link) can react to disconnects and reconnects.
+    has_egm_gpio_ = false;
+    for (const auto &gpio: info_.gpios) {
+      for (const auto &si: gpio.state_interfaces) {
+        if (gpio.name == "egm" && si.name == "connected") {
+          has_egm_gpio_ = true;
+        }
+      }
+    }
+    RCLCPP_INFO(LOGGER, "egm/connected state interface: %s",
+                has_egm_gpio_ ? "exported" : "not in URDF");
+
     // Configure EGM
     RCLCPP_INFO(LOGGER, "Configuring EGM interface...");
 
@@ -192,6 +206,9 @@ namespace abb_hardware_interface {
     // the init-seeded values.
     egm_manager_->read(motion_data_);
     applyCouplingAndSetStates();
+    if (has_egm_gpio_) {
+      set_state("egm/connected", 1.0); // activation blocks until connected
+    }
 
     // Commands start at the coupled states so the first write holds position.
     for (const auto &name: joint_names_) {
@@ -212,14 +229,17 @@ namespace abb_hardware_interface {
     // Try to read from EGM
     egm_connected_ = egm_manager_->read(motion_data_);
 
-    // Check if we just lost connection
+    // Connection transitions are operational events, not debug noise: a
+    // disconnect freezes the exported states and drops commands until the
+    // stream returns.
     if (was_connected && !egm_connected_) {
-      RCLCPP_DEBUG(LOGGER, "EGM connection lost");
+      RCLCPP_WARN(LOGGER, "EGM connection lost - exported states frozen, commands dropped");
     }
-
-    // Check if we just regained connection
     if (!was_connected && egm_connected_) {
-      RCLCPP_DEBUG(LOGGER, "EGM connection restored");
+      RCLCPP_INFO(LOGGER, "EGM connection restored - states live again");
+    }
+    if (has_egm_gpio_) {
+      set_state("egm/connected", egm_connected_ ? 1.0 : 0.0);
     }
 
     // Only update values if connected.
@@ -295,7 +315,17 @@ namespace abb_hardware_interface {
       joints.at(2).command.velocity -= J23_factor * joints.at(1).command.velocity;
     }
 
-    egm_manager_->write(motion_data_);
+    // The EGM manager THROWS on NaN/out-of-range commands; an unhandled
+    // exception here kills ros2_control_node. Drop the cycle instead - the
+    // robot keeps its last reference and the offending controller is visible
+    // in the log.
+    try {
+      egm_manager_->write(motion_data_);
+    } catch (const std::exception &e) {
+      static rclcpp::Clock throttle_clock;
+      RCLCPP_ERROR_THROTTLE(LOGGER, throttle_clock, 1000,
+                            "EGM rejected a joint command (%s) - cycle dropped", e.what());
+    }
 
     return return_type::OK;
   }
