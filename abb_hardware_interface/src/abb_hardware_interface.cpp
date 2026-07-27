@@ -15,6 +15,7 @@
 
 #include <abb_hardware_interface/abb_hardware_interface.hpp>
 #include <abb_hardware_interface/utilities.hpp>
+#include <algorithm>
 #include <limits>
 
 using namespace std::chrono_literals;
@@ -226,8 +227,12 @@ namespace abb_hardware_interface {
     // Store previous connection state
     bool was_connected = egm_connected_;
 
-    // Try to read from EGM
-    egm_connected_ = egm_manager_->read(motion_data_);
+    // Try to read from EGM. A fresh message reconnects immediately; the
+    // lost verdict is debounced so a single late read (jitter, an overrun)
+    // does not flip the connection state for one cycle.
+    const bool fresh = egm_manager_->read(motion_data_);
+    stale_reads_ = fresh ? 0 : std::min(stale_reads_ + 1, kDisconnectDebounceReads);
+    egm_connected_ = fresh || (was_connected && stale_reads_ < kDisconnectDebounceReads);
 
     // Connection transitions are operational events, not debug noise: a
     // disconnect freezes the exported states and drops commands until the

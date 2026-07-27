@@ -88,6 +88,13 @@ private:
 
   // Track EGM connection state
   bool egm_connected_ = false;
+  // Consecutive read() cycles without a fresh EGM message. The manager's own
+  // freshness window is ~20 ms (5 messages at 250 Hz), which UDP jitter and
+  // marginal control-loop overruns cross routinely; the connection verdict
+  // debounces over kDisconnectDebounceReads cycles so those blips do not
+  // fire disconnect/reconnect edges (and the re-seeds hanging off them).
+  static constexpr unsigned int kDisconnectDebounceReads = 25;  // ~100 ms at 250 Hz
+  unsigned int stale_reads_ = kDisconnectDebounceReads;
   // URDF declares the egm/connected gpio; exported every read cycle.
   bool has_egm_gpio_ = false;
   std::vector<double> last_positions_;
