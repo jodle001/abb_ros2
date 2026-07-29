@@ -49,6 +49,11 @@ namespace
  * \brief Time [s] for throttled ROS logging.
  */
 constexpr double THROTTLE_TIME{ 10.0 };
+
+/**
+ * \brief Consecutive failed polls before the controller is declared unreachable.
+ */
+constexpr unsigned int POLL_FAILURE_THRESHOLD{ 3 };
 }  // namespace
 
 namespace abb_rws_client
@@ -81,6 +86,13 @@ RWSStatePublisherROS::RWSStatePublisherROS(const rclcpp::Node::SharedPtr& node, 
     runtime_state_pub_ =
         node_->create_publisher<abb_rapid_sm_addin_msgs::msg::RuntimeState>("~/sm_addin/runtime_states", 10);
   }
+  controller_reachable_pub_ =
+      node_->create_publisher<std_msgs::msg::Bool>("~/controller_reachable", rclcpp::QoS(1).transient_local());
+  // The connection was just established, so seed the latch as reachable.
+  std_msgs::msg::Bool reachable_msg;
+  reachable_msg.data = true;
+  controller_reachable_pub_->publish(reachable_msg);
+
   auto polling_rate = node_->get_parameter("polling_rate").as_double();
   timer_ = node_->create_wall_timer(std::chrono::milliseconds(static_cast<long>(1000.0 / polling_rate)),
                                     std::bind(&RWSStatePublisherROS::timer_callback, this));
@@ -92,14 +104,23 @@ void RWSStatePublisherROS::timer_callback()
   try
   {
     rws_manager_.collectAndUpdateRuntimeData(system_state_data_, motion_data_);
+    consecutive_poll_failures_ = 0;
   }
   catch (const std::runtime_error& exception)
   {
+    if (consecutive_poll_failures_ < POLL_FAILURE_THRESHOLD)
+    {
+      ++consecutive_poll_failures_;
+    }
     auto& clk = *node_->get_clock();
     RCLCPP_WARN_STREAM_THROTTLE(node_->get_logger(), clk, THROTTLE_TIME,
                                 "Periodic polling of runtime data via RWS failed with '" << exception.what()
                                                                                          << "' (will try again later)");
   }
+
+  // Everything below republishes the last successful poll whether or not this one succeeded, so consumers need this
+  // flag to distinguish live data from a frozen snapshot.
+  publish_controller_reachable(consecutive_poll_failures_ < POLL_FAILURE_THRESHOLD);
 
   sensor_msgs::msg::JointState joint_state_msg;
   for (const auto& group : motion_data_.groups)
@@ -164,6 +185,31 @@ void RWSStatePublisherROS::timer_callback()
   {
     sm_runtime_state_msg.header.stamp = time;
     runtime_state_pub_->publish(sm_runtime_state_msg);
+  }
+}
+
+void RWSStatePublisherROS::publish_controller_reachable(bool reachable)
+{
+  if (reachable == last_published_reachable_)
+  {
+    return;
+  }
+  last_published_reachable_ = reachable;
+
+  std_msgs::msg::Bool msg;
+  msg.data = reachable;
+  controller_reachable_pub_->publish(msg);
+
+  if (reachable)
+  {
+    RCLCPP_INFO(node_->get_logger(), "Robot controller is reachable again over RWS");
+  }
+  else
+  {
+    RCLCPP_ERROR(node_->get_logger(),
+                 "Robot controller is unreachable over RWS after %u consecutive failed polls - "
+                 "the published states are now a frozen snapshot",
+                 POLL_FAILURE_THRESHOLD);
   }
 }
 }  // namespace abb_rws_client

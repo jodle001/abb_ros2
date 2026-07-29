@@ -44,6 +44,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
+#include <std_msgs/msg/bool.hpp>
 
 #include <abb_egm_rws_managers/rws_manager.h>
 #include <abb_egm_rws_managers/system_data_parser.h>
@@ -71,6 +72,11 @@ private:
    * \brief Time callback for receving and publishing of system states from robot.
    */
   void timer_callback();
+
+  /**
+   * \brief Publishes the reachability flag, on change only.
+   */
+  void publish_controller_reachable(bool reachable);
 
   rclcpp::Node::SharedPtr node_;
   rclcpp::TimerBase::SharedPtr timer_;
@@ -101,6 +107,22 @@ private:
    * Note: Only used if the Add-In is present in the system.
    */
   rclcpp::Publisher<abb_rapid_sm_addin_msgs::msg::RuntimeState>::SharedPtr runtime_state_pub_;
+
+  /**
+   * \brief Publisher for whether the robot controller is reachable over RWS.
+   *
+   * Latched, published on change. A failed poll leaves the state messages above holding their last values, so without
+   * this flag a consumer cannot tell live data from a frozen snapshot of an unreachable controller.
+   */
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr controller_reachable_pub_;
+
+  /**
+   * \brief Consecutive failed polls, saturated at the threshold. Rides out a single hiccup before declaring the
+   *        controller unreachable.
+   */
+  unsigned int consecutive_poll_failures_{ 0 };
+
+  bool last_published_reachable_{ true };
 
   /**
    * \brief Motion data for each mechanical unit defined in the robot controller.
