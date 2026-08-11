@@ -55,23 +55,23 @@ namespace robot
 {
 namespace utilities
 {
-uint8_t map(const rws::RWSInterface::RAPIDTaskExecutionState state)
+uint8_t map(const rws::rw::RAPIDTaskExecutionState state)
 {
   switch (state)
   {
-    case rws::RWSInterface::UNKNOWN:
+    case rws::rw::RAPIDTaskExecutionState::UNKNOWN:
       return abb_robot_msgs::msg::RAPIDTaskState::EXECUTION_STATE_UNKNOWN;
 
-    case rws::RWSInterface::READY:
+    case rws::rw::RAPIDTaskExecutionState::READY:
       return abb_robot_msgs::msg::RAPIDTaskState::EXECUTION_STATE_READY;
 
-    case rws::RWSInterface::STOPPED:
+    case rws::rw::RAPIDTaskExecutionState::STOPPED:
       return abb_robot_msgs::msg::RAPIDTaskState::EXECUTION_STATE_STOPPED;
 
-    case rws::RWSInterface::STARTED:
+    case rws::rw::RAPIDTaskExecutionState::STARTED:
       return abb_robot_msgs::msg::RAPIDTaskState::EXECUTION_STATE_STARTED;
 
-    case rws::RWSInterface::UNINITIALIZED:
+    case rws::rw::RAPIDTaskExecutionState::UNINITIALIZED:
       return abb_robot_msgs::msg::RAPIDTaskState::EXECUTION_STATE_UNINITIALIZED;
 
     default:
@@ -186,7 +186,7 @@ abb_rapid_msgs::msg::WObjData map(const rws::WObjData& rws_wobjdata)
   return ros_wobjdata;
 }
 
-abb_rapid_sm_addin_msgs::msg::EGMSettings map(const rws::RWSStateMachineInterface::EGMSettings& rws_egm_settings)
+abb_rapid_sm_addin_msgs::msg::EGMSettings map(const rws::v1_0::RWSStateMachineInterface::EGMSettings& rws_egm_settings)
 {
   abb_rapid_sm_addin_msgs::msg::EGMSettings ros_egm_settings;
 
@@ -220,46 +220,46 @@ unsigned int mapStateMachineSGCommand(const unsigned int command)
   switch (command)
   {
     case abb_rapid_sm_addin_msgs::srv::SetSGCommand::Request::SG_COMMAND_NONE:
-      return rws::RWSStateMachineInterface::SG_COMMAND_NONE;
+      return rws::v1_0::RWSStateMachineInterface::SG_COMMAND_NONE;
 
     case abb_rapid_sm_addin_msgs::srv::SetSGCommand::Request::SG_COMMAND_INITIALIZE:
-      return rws::RWSStateMachineInterface::SG_COMMAND_INITIALIZE;
+      return rws::v1_0::RWSStateMachineInterface::SG_COMMAND_INITIALIZE;
 
     case abb_rapid_sm_addin_msgs::srv::SetSGCommand::Request::SG_COMMAND_CALIBRATE:
-      return rws::RWSStateMachineInterface::SG_COMMAND_CALIBRATE;
+      return rws::v1_0::RWSStateMachineInterface::SG_COMMAND_CALIBRATE;
 
     case abb_rapid_sm_addin_msgs::srv::SetSGCommand::Request::SG_COMMAND_MOVE_TO:
-      return rws::RWSStateMachineInterface::SG_COMMAND_MOVE_TO;
+      return rws::v1_0::RWSStateMachineInterface::SG_COMMAND_MOVE_TO;
 
     case abb_rapid_sm_addin_msgs::srv::SetSGCommand::Request::SG_COMMAND_GRIP_IN:
-      return rws::RWSStateMachineInterface::SG_COMMAND_GRIP_IN;
+      return rws::v1_0::RWSStateMachineInterface::SG_COMMAND_GRIP_IN;
 
     case abb_rapid_sm_addin_msgs::srv::SetSGCommand::Request::SG_COMMAND_GRIP_OUT:
-      return rws::RWSStateMachineInterface::SG_COMMAND_GRIP_OUT;
+      return rws::v1_0::RWSStateMachineInterface::SG_COMMAND_GRIP_OUT;
 
     case abb_rapid_sm_addin_msgs::srv::SetSGCommand::Request::SG_COMMAND_BLOW_ON_1:
-      return rws::RWSStateMachineInterface::SG_COMMAND_BLOW_ON_1;
+      return rws::v1_0::RWSStateMachineInterface::SG_COMMAND_BLOW_ON_1;
 
     case abb_rapid_sm_addin_msgs::srv::SetSGCommand::Request::SG_COMMAND_BLOW_ON_2:
-      return rws::RWSStateMachineInterface::SG_COMMAND_BLOW_ON_2;
+      return rws::v1_0::RWSStateMachineInterface::SG_COMMAND_BLOW_ON_2;
 
     case abb_rapid_sm_addin_msgs::srv::SetSGCommand::Request::SG_COMMAND_BLOW_OFF_1:
-      return rws::RWSStateMachineInterface::SG_COMMAND_BLOW_OFF_1;
+      return rws::v1_0::RWSStateMachineInterface::SG_COMMAND_BLOW_OFF_1;
 
     case abb_rapid_sm_addin_msgs::srv::SetSGCommand::Request::SG_COMMAND_BLOW_OFF_2:
-      return rws::RWSStateMachineInterface::SG_COMMAND_BLOW_OFF_2;
+      return rws::v1_0::RWSStateMachineInterface::SG_COMMAND_BLOW_OFF_2;
 
     case abb_rapid_sm_addin_msgs::srv::SetSGCommand::Request::SG_COMMAND_VACUUM_ON_1:
-      return rws::RWSStateMachineInterface::SG_COMMAND_VACUUM_ON_1;
+      return rws::v1_0::RWSStateMachineInterface::SG_COMMAND_VACUUM_ON_1;
 
     case abb_rapid_sm_addin_msgs::srv::SetSGCommand::Request::SG_COMMAND_VACUUM_ON_2:
-      return rws::RWSStateMachineInterface::SG_COMMAND_VACUUM_ON_2;
+      return rws::v1_0::RWSStateMachineInterface::SG_COMMAND_VACUUM_ON_2;
 
     case abb_rapid_sm_addin_msgs::srv::SetSGCommand::Request::SG_COMMAND_VACUUM_OFF_1:
-      return rws::RWSStateMachineInterface::SG_COMMAND_VACUUM_OFF_1;
+      return rws::v1_0::RWSStateMachineInterface::SG_COMMAND_VACUUM_OFF_1;
 
     case abb_rapid_sm_addin_msgs::srv::SetSGCommand::Request::SG_COMMAND_VACUUM_OFF_2:
-      return rws::RWSStateMachineInterface::SG_COMMAND_VACUUM_OFF_2;
+      return rws::v1_0::RWSStateMachineInterface::SG_COMMAND_VACUUM_OFF_2;
 
     case abb_rapid_sm_addin_msgs::srv::SetSGCommand::Request::SG_COMMAND_UNKNOWN:
     default:
@@ -326,9 +326,9 @@ rws::WObjData map(const abb_rapid_msgs::msg::WObjData& ros_wobjdata)
   return rws_wobjdata;
 }
 
-rws::RWSStateMachineInterface::EGMSettings map(const abb_rapid_sm_addin_msgs::msg::EGMSettings& ros_egm_settings)
+rws::v1_0::RWSStateMachineInterface::EGMSettings map(const abb_rapid_sm_addin_msgs::msg::EGMSettings& ros_egm_settings)
 {
-  rws::RWSStateMachineInterface::EGMSettings rws_egm_settings;
+  rws::v1_0::RWSStateMachineInterface::EGMSettings rws_egm_settings;
 
   rws_egm_settings.allow_egm_motions.value = ros_egm_settings.allow_egm_motions;
   rws_egm_settings.use_presync.value = ros_egm_settings.use_presync;

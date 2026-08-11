@@ -61,8 +61,7 @@ namespace abb_rws_client
 RWSStatePublisherROS::RWSStatePublisherROS(const rclcpp::Node::SharedPtr& node, const std::string& robot_ip,
                                            unsigned short robot_port)
   : node_(node)
-  , rws_manager_{ robot_ip, robot_port, abb::rws::SystemConstants::General::DEFAULT_USERNAME,
-                  abb::rws::SystemConstants::General::DEFAULT_PASSWORD }
+  , rws_manager_{ robot_ip, robot_port, abb::rws::v1_0::DEFAULT_USERNAME, abb::rws::v1_0::DEFAULT_PASSWORD }
 {
   node_->declare_parameter("polling_rate", 5.0);
 
@@ -136,9 +135,9 @@ void RWSStatePublisherROS::timer_callback()
   }
 
   abb_robot_msgs::msg::SystemState system_state_msg;
-  system_state_msg.motors_on = system_state_data_.motors_on.isTrue();
-  system_state_msg.auto_mode = system_state_data_.auto_mode.isTrue();
-  system_state_msg.rapid_running = system_state_data_.rapid_running.isTrue();
+  system_state_msg.motors_on = system_state_data_.motors_on;
+  system_state_msg.auto_mode = system_state_data_.auto_mode;
+  system_state_msg.rapid_running = system_state_data_.rapid_running;
 
   for (const auto& task : system_state_data_.rapid_tasks)
   {

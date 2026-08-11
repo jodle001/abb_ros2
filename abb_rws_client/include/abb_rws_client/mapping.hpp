@@ -44,6 +44,8 @@
 
 #include <abb_egm_rws_managers/utilities.h>
 #include <abb_librws/rws_rapid.h>
+#include <abb_librws/common/rw/rapid.h>
+#include <abb_librws/v1_0/rws_state_machine_interface.h>
 
 #include <abb_rapid_msgs/msg/tool_data.hpp>
 #include <abb_rapid_msgs/msg/w_obj_data.hpp>
@@ -62,7 +64,7 @@ namespace utilities
  *
  * \return uint8_t containing the mapped state.
  */
-uint8_t map(const rws::RWSInterface::RAPIDTaskExecutionState state);
+uint8_t map(const rws::rw::RAPIDTaskExecutionState state);
 
 /**
  * \brief Maps RobotWare StateMachine Add-In state to ROS representation.
@@ -155,7 +157,7 @@ abb_rapid_msgs::msg::WObjData map(const rws::WObjData& rws_wobjdata);
  *
  * \return abb_rapid_sm_addin_msgs::EGMSettings containing the mapped data.
  */
-abb_rapid_sm_addin_msgs::msg::EGMSettings map(const rws::RWSStateMachineInterface::EGMSettings& rws_egm_settings);
+abb_rapid_sm_addin_msgs::msg::EGMSettings map(const rws::v1_0::RWSStateMachineInterface::EGMSettings& rws_egm_settings);
 
 /**
  * \brief Maps a RAPID 'pos' data type from ROS to RWS representation.
@@ -219,7 +221,7 @@ rws::WObjData map(const abb_rapid_msgs::msg::WObjData& ros_wobjdata);
  *
  * \return rws::RWSStateMachineInterface::EGMSettings containing the mapped data.
  */
-rws::RWSStateMachineInterface::EGMSettings map(const abb_rapid_sm_addin_msgs::msg::EGMSettings& ros_egm_settings);
+rws::v1_0::RWSStateMachineInterface::EGMSettings map(const abb_rapid_sm_addin_msgs::msg::EGMSettings& ros_egm_settings);
 
 /**
  * \brief Maps EGM state to ROS representation.

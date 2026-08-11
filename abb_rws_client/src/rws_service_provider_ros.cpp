@@ -40,20 +40,22 @@
 
 #include <abb_rws_client/rws_service_provider_ros.hpp>
 
+#include <stdexcept>
+#include <variant>
+
 #include <abb_robot_msgs/msg/service_responses.hpp>
 
 #include <abb_rws_client/mapping.hpp>
 #include <abb_hardware_interface/utilities.hpp>
 
-using RAPIDSymbols = abb::rws::RWSStateMachineInterface::ResourceIdentifiers::RAPID::Symbols;
+using RAPIDSymbols = abb::rws::v1_0::RWSStateMachineInterface::ResourceIdentifiers::RAPID::Symbols;
 
 namespace abb_rws_client
 {
 RWSServiceProviderROS::RWSServiceProviderROS(const rclcpp::Node::SharedPtr& node, const std::string& robot_ip,
                                              unsigned short robot_port)
   : node_(node)
-  , rws_manager_{ robot_ip, robot_port, abb::rws::SystemConstants::General::DEFAULT_USERNAME,
-                  abb::rws::SystemConstants::General::DEFAULT_PASSWORD }
+  , rws_manager_{ robot_ip, robot_port, abb::rws::v1_0::DEFAULT_USERNAME, abb::rws::v1_0::DEFAULT_PASSWORD }
 {
   std::string robot_id = node_->get_parameter("robot_nickname").as_string();
   bool no_connection_timeout = node_->get_parameter("no_connection_timeout").as_bool();
@@ -235,16 +237,17 @@ bool RWSServiceProviderROS::getFileContents(const abb_robot_msgs::srv::GetFileCo
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    if (interface.getFile(abb::rws::RWSClient::FileResource(req->filename), &res->contents))
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      res->contents = interface.getFile(abb::rws::FileResource(req->filename));
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -263,18 +266,29 @@ bool RWSServiceProviderROS::getIOSignal(const abb_robot_msgs::srv::GetIOSignal::
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    res->value = interface.getIOSignal(req->signal);
-
-    if (!res->value.empty())
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
-      res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
+      // RWSInterface::getIOSignal(name) is private in the modernized API; use the
+      // public getIOSignals() map and look up the requested signal by name.
+      const auto signals = interface.getIOSignals();
+      const auto it = signals.find(req->signal);
+      if (it != signals.end())
+      {
+        res->value = std::visit([](const auto& value) { return std::to_string(value); }, it->second);
+        res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
+      }
+      else
+      {
+        res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+        res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
+      }
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -293,18 +307,20 @@ bool RWSServiceProviderROS::getRAPIDBool(const abb_robot_msgs::srv::GetRAPIDBool
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    abb::rws::RAPIDBool rapid_bool;
-    if (interface.getRAPIDSymbolData(req->path.task, req->path.module, req->path.symbol, &rapid_bool))
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      abb::rws::RAPIDBool rapid_bool;
+      interface.getRAPIDSymbolData(abb::rws::RAPIDResource{ req->path.task, req->path.module, req->path.symbol },
+                                   rapid_bool);
       res->value = rapid_bool.value;
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -323,18 +339,20 @@ bool RWSServiceProviderROS::getRAPIDDNum(const abb_robot_msgs::srv::GetRAPIDDnum
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    abb::rws::RAPIDDnum rapid_dnum;
-    if (interface.getRAPIDSymbolData(req->path.task, req->path.module, req->path.symbol, &rapid_dnum))
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      abb::rws::RAPIDDnum rapid_dnum;
+      interface.getRAPIDSymbolData(abb::rws::RAPIDResource{ req->path.task, req->path.module, req->path.symbol },
+                                   rapid_dnum);
       res->value = rapid_dnum.value;
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -353,18 +371,20 @@ bool RWSServiceProviderROS::getRAPIDNum(const abb_robot_msgs::srv::GetRAPIDNum::
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    abb::rws::RAPIDNum rapid_num{};
-    if (interface.getRAPIDSymbolData(req->path.task, req->path.module, req->path.symbol, &rapid_num))
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      abb::rws::RAPIDNum rapid_num{};
+      interface.getRAPIDSymbolData(abb::rws::RAPIDResource{ req->path.task, req->path.module, req->path.symbol },
+                                   rapid_num);
       res->value = rapid_num.value;
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -383,18 +403,20 @@ bool RWSServiceProviderROS::getRAPIDString(const abb_robot_msgs::srv::GetRAPIDSt
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    abb::rws::RAPIDString rapid_string{};
-    if (interface.getRAPIDSymbolData(req->path.task, req->path.module, req->path.symbol, &rapid_string))
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      abb::rws::RAPIDString rapid_string{};
+      interface.getRAPIDSymbolData(abb::rws::RAPIDResource{ req->path.task, req->path.module, req->path.symbol },
+                                   rapid_string);
       res->value = rapid_string.value;
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -413,18 +435,17 @@ bool RWSServiceProviderROS::getRAPIDSymbol(const abb_robot_msgs::srv::GetRAPIDSy
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    res->value = interface.getRAPIDSymbolData(req->path.task, req->path.module, req->path.symbol);
-
-    if (!res->value.empty())
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      res->value = interface.getRAPIDSymbolData(req->path.task, req->path.module, req->path.symbol);
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -439,7 +460,7 @@ bool RWSServiceProviderROS::getSpeedRatio(const abb_robot_msgs::srv::GetSpeedRat
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
     try
     {
       res->speed_ratio = interface.getSpeedRatio();
@@ -449,7 +470,7 @@ bool RWSServiceProviderROS::getSpeedRatio(const abb_robot_msgs::srv::GetSpeedRat
     {
       res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -472,15 +493,16 @@ bool RWSServiceProviderROS::ppToMain(const abb_robot_msgs::srv::TriggerWithResul
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    if (interface.resetRAPIDProgramPointer())
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      interface.resetRAPIDProgramPointer();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      res->message = exception.what();
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -499,16 +521,17 @@ bool RWSServiceProviderROS::setFileContents(const abb_robot_msgs::srv::SetFileCo
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    if (interface.uploadFile(abb::rws::RWSClient::FileResource(req->filename), req->contents))
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      interface.uploadFile(abb::rws::FileResource(req->filename), req->contents);
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -527,16 +550,39 @@ bool RWSServiceProviderROS::setIOSignal(const abb_robot_msgs::srv::SetIOSignal::
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    if (interface.setIOSignal(req->signal, req->value))
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      // The string-valued RWSInterface::setIOSignal(name, value) is private in the modernized
+      // API; only the typed public setters (setDigitalSignal/setAnalogSignal) remain. Resolve
+      // the signal's actual type from the controller (getIOSignals() reports each signal as a
+      // bool or float variant) and dispatch to the matching typed setter, so analog signals are
+      // preserved and not silently coerced to digital.
+      const auto signals = interface.getIOSignals();
+      const auto it = signals.find(req->signal);
+      if (it == signals.end())
+      {
+        res->message = "IO signal '" + req->signal + "' not found on the controller";
+        res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
+        return;
+      }
+      if (std::holds_alternative<float>(it->second))
+      {
+        interface.setAnalogSignal(req->signal, std::stof(req->value));
+      }
+      else
+      {
+        const bool value = (req->value == "1" || req->value == "true" || req->value == "TRUE" ||
+                            req->value == "high" || req->value == "HIGH");
+        interface.setDigitalSignal(req->signal, value);
+      }
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -551,15 +597,16 @@ bool RWSServiceProviderROS::setMotorsOff(const abb_robot_msgs::srv::TriggerWithR
     return true;
   }
 
-  rws_manager_.runPriorityService([&](abb::rws::RWSStateMachineInterface& interface) {
-    if (interface.setMotorsOff())
+  rws_manager_.runPriorityService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      interface.setMotorsOff();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      res->message = exception.what();
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -582,15 +629,16 @@ bool RWSServiceProviderROS::setMotorsOn(const abb_robot_msgs::srv::TriggerWithRe
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    if (interface.setMotorsOn())
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      interface.setMotorsOn();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      res->message = exception.what();
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -613,17 +661,19 @@ bool RWSServiceProviderROS::setRAPIDBool(const abb_robot_msgs::srv::SetRAPIDBool
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    abb::rws::RAPIDBool rapid_bool = static_cast<bool>(req->value);
-    if (interface.setRAPIDSymbolData(req->path.task, req->path.module, req->path.symbol, rapid_bool))
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      abb::rws::RAPIDBool rapid_bool = static_cast<bool>(req->value);
+      interface.setRAPIDSymbolData(abb::rws::RAPIDResource{ req->path.task, req->path.module, req->path.symbol },
+                                   rapid_bool);
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -646,17 +696,19 @@ bool RWSServiceProviderROS::setRAPIDDNum(const abb_robot_msgs::srv::SetRAPIDDnum
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    abb::rws::RAPIDDnum rapid_dnum = req->value;
-    if (interface.setRAPIDSymbolData(req->path.task, req->path.module, req->path.symbol, rapid_dnum))
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      abb::rws::RAPIDDnum rapid_dnum = req->value;
+      interface.setRAPIDSymbolData(abb::rws::RAPIDResource{ req->path.task, req->path.module, req->path.symbol },
+                                   rapid_dnum);
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -679,17 +731,19 @@ bool RWSServiceProviderROS::setRAPIDNum(const abb_robot_msgs::srv::SetRAPIDNum::
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    abb::rws::RAPIDNum rapid_num = req->value;
-    if (interface.setRAPIDSymbolData(req->path.task, req->path.module, req->path.symbol, rapid_num))
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      abb::rws::RAPIDNum rapid_num = req->value;
+      interface.setRAPIDSymbolData(abb::rws::RAPIDResource{ req->path.task, req->path.module, req->path.symbol },
+                                   rapid_num);
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -712,17 +766,19 @@ bool RWSServiceProviderROS::setRAPIDString(const abb_robot_msgs::srv::SetRAPIDSt
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    abb::rws::RAPIDString rapid_string = req->value;
-    if (interface.setRAPIDSymbolData(req->path.task, req->path.module, req->path.symbol, rapid_string))
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      abb::rws::RAPIDString rapid_string = req->value;
+      interface.setRAPIDSymbolData(abb::rws::RAPIDResource{ req->path.task, req->path.module, req->path.symbol },
+                                   rapid_string);
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -745,16 +801,17 @@ bool RWSServiceProviderROS::setRAPIDSymbol(const abb_robot_msgs::srv::SetRAPIDSy
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    if (interface.setRAPIDSymbolData(req->path.task, req->path.module, req->path.symbol, req->value))
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      interface.setRAPIDSymbolData(req->path.task, req->path.module, req->path.symbol, req->value);
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -773,23 +830,17 @@ bool RWSServiceProviderROS::setSpeedRatio(const abb_robot_msgs::srv::SetSpeedRat
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
     try
     {
-      if (interface.setSpeedRatio(req->speed_ratio))
-      {
-        res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
-      }
-      else
-      {
-        res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
-        res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      }
+      interface.setSpeedRatio(req->speed_ratio);
+      res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
     catch (const std::exception& exception)
     {
       res->message = exception.what();
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -812,15 +863,16 @@ bool RWSServiceProviderROS::startRAPID(const abb_robot_msgs::srv::TriggerWithRes
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    if (interface.startRAPIDExecution())
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      interface.startRAPIDExecution();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      res->message = exception.what();
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -835,15 +887,16 @@ bool RWSServiceProviderROS::stopRAPID(const abb_robot_msgs::srv::TriggerWithResu
     return true;
   }
 
-  rws_manager_.runPriorityService([&](abb::rws::RWSStateMachineInterface& interface) {
-    if (interface.stopRAPIDExecution())
+  rws_manager_.runPriorityService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      interface.stopRAPIDExecution();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      res->message = exception.what();
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -874,19 +927,19 @@ bool RWSServiceProviderROS::getEGMSettings(const abb_rapid_sm_addin_msgs::srv::G
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    abb::rws::RWSStateMachineInterface::EGMSettings settings;
-
-    if (interface.services().egm().getSettings(req->task, &settings))
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      abb::rws::v1_0::RWSStateMachineInterface::EGMSettings settings;
+      interface.services().egm().getSettings(req->task, &settings);
       res->settings = abb::robot::utilities::map(settings);
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -921,18 +974,18 @@ bool RWSServiceProviderROS::setEGMSettings(const abb_rapid_sm_addin_msgs::srv::S
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    abb::rws::RWSStateMachineInterface::EGMSettings settings = abb::robot::utilities::map(req->settings);
-
-    if (interface.services().egm().setSettings(req->task, settings))
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      abb::rws::v1_0::RWSStateMachineInterface::EGMSettings settings = abb::robot::utilities::map(req->settings);
+      interface.services().egm().setSettings(req->task, settings);
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -959,16 +1012,17 @@ bool RWSServiceProviderROS::runRAPIDRoutine(const abb_robot_msgs::srv::TriggerWi
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    if (interface.services().rapid().signalRunRAPIDRoutine())
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      interface.services().rapid().signalRunRAPIDRoutine();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -995,16 +1049,17 @@ bool RWSServiceProviderROS::runSGRoutine(const abb_robot_msgs::srv::TriggerWithR
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    if (interface.services().sg().signalRunSGRoutine())
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      interface.services().sg().signalRunSGRoutine();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -1039,16 +1094,17 @@ bool RWSServiceProviderROS::setRAPIDRoutine(const abb_rapid_sm_addin_msgs::srv::
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    if (interface.services().rapid().setRoutineName(req->task, req->routine))
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      interface.services().rapid().setRoutineName(req->task, req->routine);
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -1095,20 +1151,23 @@ bool RWSServiceProviderROS::setSGCommand(const abb_rapid_sm_addin_msgs::srv::Set
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    abb::rws::RAPIDNum sg_command_input = static_cast<float>(req_command);
-    abb::rws::RAPIDNum sg_target_position_input = req->target_position;
-
-    if (interface.setRAPIDSymbolData(req->task, RAPIDSymbols::SG_COMMAND_INPUT, sg_command_input) &&
-        interface.setRAPIDSymbolData(req->task, RAPIDSymbols::SG_TARGET_POSTION_INPUT, sg_target_position_input))
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      abb::rws::RAPIDNum sg_command_input = static_cast<float>(req_command);
+      abb::rws::RAPIDNum sg_target_position_input = req->target_position;
+
+      interface.setRAPIDSymbolData(abb::rws::RAPIDResource{ req->task, RAPIDSymbols::SG_COMMAND_INPUT },
+                                   sg_command_input);
+      interface.setRAPIDSymbolData(abb::rws::RAPIDResource{ req->task, RAPIDSymbols::SG_TARGET_POSTION_INPUT },
+                                   sg_target_position_input);
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -1135,16 +1194,17 @@ bool RWSServiceProviderROS::startEGMJoint(const abb_robot_msgs::srv::TriggerWith
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    if (interface.services().egm().signalEGMStartJoint())
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      interface.services().egm().signalEGMStartJoint();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -1171,16 +1231,17 @@ bool RWSServiceProviderROS::startEGMPose(const abb_robot_msgs::srv::TriggerWithR
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    if (interface.services().egm().signalEGMStartPose())
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      interface.services().egm().signalEGMStartPose();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -1207,16 +1268,17 @@ bool RWSServiceProviderROS::startEGMStream(const abb_robot_msgs::srv::TriggerWit
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    if (interface.services().egm().signalEGMStartStream())
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      interface.services().egm().signalEGMStartStream();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -1239,16 +1301,17 @@ bool RWSServiceProviderROS::stopEGM(const abb_robot_msgs::srv::TriggerWithResult
     return true;
   }
 
-  rws_manager_.runPriorityService([&](abb::rws::RWSStateMachineInterface& interface) {
-    if (interface.services().egm().signalEGMStop())
+  rws_manager_.runPriorityService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      interface.services().egm().signalEGMStop();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
@@ -1271,16 +1334,17 @@ bool RWSServiceProviderROS::stopEGMStream(const abb_robot_msgs::srv::TriggerWith
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
-    if (interface.services().egm().signalEGMStopStream())
+  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+    try
     {
+      interface.services().egm().signalEGMStopStream();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
-    else
+    catch (const std::exception& exception)
     {
-      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
-      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
     }
   });
 
