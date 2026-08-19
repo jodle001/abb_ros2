@@ -17,6 +17,7 @@
 #include <abb_hardware_interface/utilities.hpp>
 #include <algorithm>
 #include <limits>
+#include <boost/exception/diagnostic_information.hpp>
 
 using namespace std::chrono_literals;
 
@@ -154,8 +155,13 @@ namespace abb_hardware_interface {
           return CallbackReturn::ERROR;
         }
       }
+    } catch (const std::exception &e) {
+      RCLCPP_ERROR_STREAM(LOGGER, "Failed to initialize motion data from robot controller description: "
+                                      << boost::diagnostic_information(e));
+      return CallbackReturn::ERROR;
     } catch (...) {
-      RCLCPP_ERROR_STREAM(LOGGER, "Failed to initialize motion data from robot controller description");
+      RCLCPP_ERROR_STREAM(LOGGER,
+                          "Failed to initialize motion data from robot controller description: unknown exception");
       return CallbackReturn::ERROR;
     }
 
