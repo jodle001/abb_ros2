@@ -93,8 +93,9 @@ RWSStatePublisherROS::RWSStatePublisherROS(const rclcpp::Node::SharedPtr& node, 
   controller_reachable_pub_->publish(reachable_msg);
 
   auto polling_rate = node_->get_parameter("polling_rate").as_double();
+  timer_callback_group_ = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   timer_ = node_->create_wall_timer(std::chrono::milliseconds(static_cast<long>(1000.0 / polling_rate)),
-                                    std::bind(&RWSStatePublisherROS::timer_callback, this));
+                                    std::bind(&RWSStatePublisherROS::timer_callback, this), timer_callback_group_);
   RCLCPP_INFO(node_->get_logger(), "RWS state publisher initialized!");
 }
 

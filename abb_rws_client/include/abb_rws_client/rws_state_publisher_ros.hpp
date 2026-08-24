@@ -82,6 +82,16 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
 
   /**
+   * \brief Callback group for the polling timer.
+   *
+   * This poll owns its own RWS connection (rws_manager_ below is a separate instance from the service provider's), but
+   * in the node's default group it still consumed the one executor slot every service callback needs, so a poll at
+   * polling_rate sat in front of each IO write and RAPID read served by this node. Nothing the timer touches is shared
+   * with the services, so it belongs in a group of its own.
+   */
+  rclcpp::CallbackGroup::SharedPtr timer_callback_group_;
+
+  /**
    * \brief Manager for handling RWS communication with the robot controller.
    */
   abb::robot::RWSManager rws_manager_;
