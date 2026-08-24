@@ -40,7 +40,9 @@
 
 #include <abb_rws_client/rws_service_provider_ros.hpp>
 
+#include <cstdint>
 #include <stdexcept>
+#include <string>
 #include <variant>
 
 #include <abb_robot_msgs/msg/service_responses.hpp>
@@ -538,6 +540,56 @@ bool RWSServiceProviderROS::setFileContents(const abb_robot_msgs::srv::SetFileCo
   return true;
 }
 
+std::optional<RWSServiceProviderROS::IOSignalType>
+RWSServiceProviderROS::resolveIOSignalType(abb::rws::v1_0::RWSStateMachineInterface& interface,
+                                           const std::string& signal)
+{
+  std::lock_guard<std::mutex> guard{ io_signal_types_mutex_ };
+
+  const auto cached = io_signal_types_.find(signal);
+  if (cached != io_signal_types_.end())
+  {
+    return cached->second;
+  }
+
+  // A miss is either the first write of this session or a signal the controller does not have. Refetching the table is
+  // a full GET, so rate-limit it: without that, a caller repeatedly naming a nonexistent signal would put one back in
+  // front of every other RWS operation.
+  const auto now = std::chrono::steady_clock::now();
+  if (io_signal_types_loaded_ && now - io_signal_types_fetched_ < CACHE_MISS_REFRESH_INTERVAL)
+  {
+    return std::nullopt;
+  }
+
+  const auto signals = interface.getIOSignals();
+  io_signal_types_fetched_ = now;
+  io_signal_types_loaded_ = true;
+
+  io_signal_types_.clear();
+  for (const auto& [name, value] : signals)
+  {
+    if (std::holds_alternative<float>(value))
+    {
+      io_signal_types_[name] = IOSignalType::Analog;
+    }
+    else if (std::holds_alternative<std::uint32_t>(value))
+    {
+      io_signal_types_[name] = IOSignalType::Group;
+    }
+    else
+    {
+      io_signal_types_[name] = IOSignalType::Digital;
+    }
+  }
+
+  const auto refreshed = io_signal_types_.find(signal);
+  if (refreshed == io_signal_types_.end())
+  {
+    return std::nullopt;
+  }
+  return refreshed->second;
+}
+
 bool RWSServiceProviderROS::setIOSignal(const abb_robot_msgs::srv::SetIOSignal::Request::SharedPtr req,
                                         abb_robot_msgs::srv::SetIOSignal::Response::SharedPtr res)
 {
@@ -554,21 +606,28 @@ bool RWSServiceProviderROS::setIOSignal(const abb_robot_msgs::srv::SetIOSignal::
     try
     {
       // The string-valued RWSInterface::setIOSignal(name, value) is private in the modernized
-      // API; only the typed public setters (setDigitalSignal/setAnalogSignal) remain. Resolve
-      // the signal's actual type from the controller (getIOSignals() reports each signal as a
-      // bool or float variant) and dispatch to the matching typed setter, so analog signals are
-      // preserved and not silently coerced to digital.
-      const auto signals = interface.getIOSignals();
-      const auto it = signals.find(req->signal);
-      if (it == signals.end())
+      // API; only the typed public setters (setDigitalSignal/setAnalogSignal/setGroupSignal)
+      // remain. Resolve the signal's actual type and dispatch to the matching typed setter, so
+      // analog and group signals are preserved and not silently coerced to digital. The lookup
+      // is served from cache: reading the signal table on every write is what made an IO write
+      // cost two RWS round-trips on the lane every caller of this node shares.
+      const auto type = resolveIOSignalType(interface, req->signal);
+      if (!type)
       {
         res->message = "IO signal '" + req->signal + "' not found on the controller";
         res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
         return;
       }
-      if (std::holds_alternative<float>(it->second))
+      if (*type == IOSignalType::Analog)
       {
         interface.setAnalogSignal(req->signal, std::stof(req->value));
+      }
+      else if (*type == IOSignalType::Group)
+      {
+        // A group signal carries an unsigned integer. Accept a decimal literal only; the
+        // digital spellings below ("high", "true") have no meaning for a group and would
+        // otherwise silently write 0.
+        interface.setGroupSignal(req->signal, static_cast<std::uint32_t>(std::stoul(req->value)));
       }
       else
       {

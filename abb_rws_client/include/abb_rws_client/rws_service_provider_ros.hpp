@@ -40,6 +40,10 @@
 
 #pragma once
 
+#include <chrono>
+#include <map>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -639,6 +643,34 @@ private:
    */
   bool verifyRWSManagerReady(uint16_t& result_code, std::string& message);
 
+  /**
+   * \brief Value type of an IO signal, as the controller reports it.
+   */
+  enum class IOSignalType
+  {
+    Digital,
+    Analog,
+    Group
+  };
+
+  /**
+   * \brief Resolves an IO signal's value type, from cache where possible.
+   *
+   * The typed setters need to know whether a signal is digital, analog or a group, and the only way to ask the
+   * controller is getIOSignals() - a GET of the whole signal table. Doing that ahead of every write doubled the cost
+   * of an IO write on the single RWS lane this node serves every caller from, which is what put an EGM_STOP_STREAM
+   * write behind seconds of backlog. The IO configuration cannot change while the controller runs, so the table is
+   * fetched once and reused; a miss refreshes it at most once per CACHE_MISS_REFRESH_INTERVAL so a caller naming a
+   * signal that does not exist cannot reintroduce a fetch per call.
+   *
+   * \param interface RWS interface to fetch through on a cache miss.
+   * \param signal name of the IO signal.
+   *
+   * \return the signal's type, or std::nullopt if the controller does not have it.
+   */
+  std::optional<IOSignalType> resolveIOSignalType(abb::rws::v1_0::RWSStateMachineInterface& interface,
+                                                  const std::string& signal);
+
   rclcpp::Node::SharedPtr node_;
 
   /**
@@ -680,6 +712,31 @@ private:
    * \brief The latest known RobotWare StateMachine Add-In runtime state.
    */
   abb_rapid_sm_addin_msgs::msg::RuntimeState runtime_state_;
+
+  /**
+   * \brief Cached IO signal name -> value type, as last read from the controller.
+   */
+  std::map<std::string, IOSignalType> io_signal_types_;
+
+  /**
+   * \brief Whether io_signal_types_ has ever been populated.
+   */
+  bool io_signal_types_loaded_{ false };
+
+  /**
+   * \brief When io_signal_types_ was last fetched, for rate-limiting refreshes on a miss.
+   */
+  std::chrono::steady_clock::time_point io_signal_types_fetched_{};
+
+  /**
+   * \brief Guards io_signal_types_ and its bookkeeping.
+   */
+  std::mutex io_signal_types_mutex_;
+
+  /**
+   * \brief Shortest interval between signal table refetches triggered by a cache miss.
+   */
+  static constexpr std::chrono::seconds CACHE_MISS_REFRESH_INTERVAL{ 5 };
 };
 
 }  // namespace abb_rws_client
