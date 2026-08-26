@@ -40,6 +40,7 @@
 
 #include <abb_rws_client/rws_service_provider_ros.hpp>
 
+#include <charconv>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -54,6 +55,27 @@ using RAPIDSymbols = abb::rws::v1_0::RWSStateMachineInterface::ResourceIdentifie
 
 namespace abb_rws_client
 {
+namespace
+{
+/**
+ * \brief Parses the value of a write to a group IO signal.
+ *
+ * \param text value to parse.
+ * \param value parsed value, only assigned on success.
+ *
+ * \return bool true if text is a plain decimal unsigned integer that a group signal can hold.
+ */
+bool parseGroupSignalValue(const std::string& text, std::uint32_t& value)
+{
+  const auto* const end = text.data() + text.size();
+  const auto result = std::from_chars(text.data(), end, value);
+
+  // Require the whole string to have been consumed: from_chars stops at the first character that
+  // is not part of the number, so a partial parse is a malformed value, not a valid prefix.
+  return result.ec == std::errc{} && result.ptr == end;
+}
+}  // namespace
+
 RWSServiceProviderROS::RWSServiceProviderROS(const rclcpp::Node::SharedPtr& node, const std::string& robot_ip,
                                              unsigned short robot_port, abb::robot::RWSVersion rws_version)
   : node_(node)
@@ -625,10 +647,20 @@ bool RWSServiceProviderROS::setIOSignal(const abb_robot_msgs::srv::SetIOSignal::
       }
       else if (*type == IOSignalType::Group)
       {
-        // A group signal carries an unsigned integer. Accept a decimal literal only; the
-        // digital spellings below ("high", "true") have no meaning for a group and would
-        // otherwise silently write 0.
-        interface.setGroupSignal(req->signal, static_cast<std::uint32_t>(std::stoul(req->value)));
+        // A group signal carries an unsigned integer. Accept a plain decimal literal only, and
+        // reject anything else rather than write a number the caller did not ask for: std::stoul
+        // reads "-1" as 4294967295, stops at the 'x' in "0x10" and writes 0, and truncates "3.9"
+        // to 3, each of them reported back as a successful write. The digital spellings below
+        // ("high", "true") have no meaning for a group either.
+        std::uint32_t value{};
+        if (!parseGroupSignalValue(req->value, value))
+        {
+          res->message = "IO signal '" + req->signal +
+                         "' is a group signal and takes an unsigned decimal integer, got '" + req->value + "'";
+          res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
+          return;
+        }
+        interface.setGroupSignal(req->signal, value);
       }
       else
       {
