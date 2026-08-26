@@ -46,6 +46,7 @@
 #include <abb_librws/rws_rapid.h>
 #include <abb_librws/common/rw/rapid.h>
 #include <abb_librws/v1_0/rws_state_machine_interface.h>
+#include <abb_librws/v2_0/rws_state_machine_interface.h>
 
 #include <abb_rapid_msgs/msg/tool_data.hpp>
 #include <abb_rapid_msgs/msg/w_obj_data.hpp>
@@ -157,7 +158,20 @@ abb_rapid_msgs::msg::WObjData map(const rws::WObjData& rws_wobjdata);
  *
  * \return abb_rapid_sm_addin_msgs::EGMSettings containing the mapped data.
  */
-abb_rapid_sm_addin_msgs::msg::EGMSettings map(const rws::v1_0::RWSStateMachineInterface::EGMSettings& rws_egm_settings);
+template <typename EGMSettingsType>
+abb_rapid_sm_addin_msgs::msg::EGMSettings mapEGMSettings(const EGMSettingsType& rws_egm_settings);
+
+inline abb_rapid_sm_addin_msgs::msg::EGMSettings
+map(const rws::v1_0::RWSStateMachineInterface::EGMSettings& rws_egm_settings)
+{
+  return mapEGMSettings(rws_egm_settings);
+}
+
+inline abb_rapid_sm_addin_msgs::msg::EGMSettings
+map(const rws::v2_0::RWSStateMachineInterface::EGMSettings& rws_egm_settings)
+{
+  return mapEGMSettings(rws_egm_settings);
+}
 
 /**
  * \brief Maps a RAPID 'pos' data type from ROS to RWS representation.
@@ -221,7 +235,21 @@ rws::WObjData map(const abb_rapid_msgs::msg::WObjData& ros_wobjdata);
  *
  * \return rws::RWSStateMachineInterface::EGMSettings containing the mapped data.
  */
-rws::v1_0::RWSStateMachineInterface::EGMSettings map(const abb_rapid_sm_addin_msgs::msg::EGMSettings& ros_egm_settings);
+template <typename EGMSettingsType>
+void mapEGMSettings(const abb_rapid_sm_addin_msgs::msg::EGMSettings& ros_egm_settings,
+                    EGMSettingsType& rws_egm_settings);
+
+inline void map(const abb_rapid_sm_addin_msgs::msg::EGMSettings& ros_egm_settings,
+                rws::v1_0::RWSStateMachineInterface::EGMSettings& rws_egm_settings)
+{
+  mapEGMSettings(ros_egm_settings, rws_egm_settings);
+}
+
+inline void map(const abb_rapid_sm_addin_msgs::msg::EGMSettings& ros_egm_settings,
+                rws::v2_0::RWSStateMachineInterface::EGMSettings& rws_egm_settings)
+{
+  mapEGMSettings(ros_egm_settings, rws_egm_settings);
+}
 
 /**
  * \brief Maps EGM state to ROS representation.

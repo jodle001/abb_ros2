@@ -65,7 +65,7 @@ namespace utilities
  *
  * \throw std::runtime_error if unable to establish a connection.
  */
-RobotControllerDescription establishRWSConnection(RWSManager& rws_manager, const std::string& robot_controller_id,
+RobotControllerDescription establishRWSConnection(RWSManagerBase& rws_manager, const std::string& robot_controller_id,
                                                   const bool no_connection_timeout);
 
 /**

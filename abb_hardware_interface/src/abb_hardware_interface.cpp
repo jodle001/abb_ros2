@@ -43,10 +43,20 @@ namespace abb_hardware_interface {
       return CallbackReturn::ERROR;
     }
 
-    // Get robot controller description from RWS
-    abb::robot::RWSManager rws_manager(rws_ip, rws_port, "Default User", "robotics");
+    // Get robot controller description from RWS. OmniCore controllers serve RWS 2.0 over
+    // TLS only; the xacro emits controller_generation so the right transport is selected.
+    const auto controller_generation_it = info_.hardware_parameters.find("controller_generation");
+    const auto controller_generation =
+        controller_generation_it != info_.hardware_parameters.end() ? controller_generation_it->second : "irc5";
+    const auto rws_version = abb::robot::rwsVersionFromControllerGeneration(controller_generation);
+    RCLCPP_INFO_STREAM(LOGGER, "Controller generation: " << controller_generation << " (RWS "
+                                                         << (rws_version == abb::robot::RWSVersion::v2_0 ? "2.0" :
+                                                                                                           "1.0")
+                                                         << ")");
+
+    auto rws_manager = abb::robot::makeRWSManager(rws_version, rws_ip, rws_port, "Default User", "robotics");
     const auto robot_controller_description_ =
-        abb::robot::utilities::establishRWSConnection(rws_manager, "IRB1200", true);
+        abb::robot::utilities::establishRWSConnection(*rws_manager, "IRB1200", true);
     RCLCPP_INFO_STREAM(LOGGER, "Robot controller description:\n"
                        << abb::robot::summaryText(robot_controller_description_));
 
@@ -111,7 +121,7 @@ namespace abb_hardware_interface {
     try {
       abb::robot::initializeMotionData(motion_data_, robot_controller_description_);
       abb::robot::SystemStateData system_state_data_;
-      rws_manager.collectAndUpdateRuntimeData(system_state_data_, motion_data_);
+      rws_manager->collectAndUpdateRuntimeData(system_state_data_, motion_data_);
 
       // Wire-side states in motion_data_ stay RAW for the lifetime of this
       // object; the J2-J3 coupling is folded in only during the copy to the

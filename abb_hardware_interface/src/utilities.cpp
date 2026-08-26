@@ -69,7 +69,7 @@ constexpr uint8_t RWS_RECONNECTION_WAIT_TIME{ 1 };
 auto LOGGER = rclcpp::get_logger("ABBHardwareInterfaceUtilities");
 }  // namespace
 
-RobotControllerDescription establishRWSConnection(RWSManager& rws_manager, const std::string& robot_controller_id,
+RobotControllerDescription establishRWSConnection(RWSManagerBase& rws_manager, const std::string& robot_controller_id,
                                                   const bool no_connection_timeout)
 {
   unsigned int attempt{ 0 };

@@ -49,6 +49,8 @@
 
 #include <rclcpp/rclcpp.hpp>
 
+#include <memory>
+
 #include <abb_egm_rws_managers/rws_manager.h>
 #include <abb_egm_rws_managers/system_data_parser.h>
 
@@ -90,8 +92,10 @@ public:
    * \param node ROS 2 node.
    * \param robot_ip IP address for the robot controller's RWS server.
    * \param robot_poty Port number for the robot controller's RWS server.
+   * \param rws_version of the RWS protocol the controller serves.
    */
-  RWSServiceProviderROS(const rclcpp::Node::SharedPtr& node, const std::string& robot_ip, unsigned short robot_port);
+  RWSServiceProviderROS(const rclcpp::Node::SharedPtr& node, const std::string& robot_ip, unsigned short robot_port,
+                        abb::robot::RWSVersion rws_version = abb::robot::RWSVersion::v1_0);
 
   RWSServiceProviderROS() = delete;
 
@@ -668,15 +672,15 @@ private:
    *
    * \return the signal's type, or std::nullopt if the controller does not have it.
    */
-  std::optional<IOSignalType> resolveIOSignalType(abb::rws::v1_0::RWSStateMachineInterface& interface,
-                                                  const std::string& signal);
+  template <typename Interface>
+  std::optional<IOSignalType> resolveIOSignalType(Interface& interface, const std::string& signal);
 
   rclcpp::Node::SharedPtr node_;
 
   /**
    * \brief Manager for handling RWS communication with the robot controller.
    */
-  abb::robot::RWSManager rws_manager_;
+  std::unique_ptr<abb::robot::RWSManagerBase> rws_manager_;
 
   /**
    * \brief Description of the connected robot controller.
