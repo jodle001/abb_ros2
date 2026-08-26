@@ -663,9 +663,14 @@ private:
    * The typed setters need to know whether a signal is digital, analog or a group, and the only way to ask the
    * controller is getIOSignals() - a GET of the whole signal table. Doing that ahead of every write doubled the cost
    * of an IO write on the single RWS lane this node serves every caller from, which is what put an EGM_STOP_STREAM
-   * write behind seconds of backlog. The IO configuration cannot change while the controller runs, so the table is
-   * fetched once and reused; a miss refreshes it at most once per CACHE_MISS_REFRESH_INTERVAL so a caller naming a
-   * signal that does not exist cannot reintroduce a fetch per call.
+   * write behind seconds of backlog. The table is therefore cached, but only for CACHE_TTL: a warm start can retype
+   * a signal, and a cache that never expires would go on dispatching to the wrong typed setter for the rest of the
+   * session.
+   *
+   * A signal the table does not have is rate-limited by name, to one refetch per name per
+   * CACHE_MISS_REFRESH_INTERVAL. A caller naming a signal that does not exist still cannot reintroduce a fetch per
+   * call, but a signal that was only transiently absent from the table is retried on its next call rather than
+   * reported missing for the rest of the interval.
    *
    * \param interface RWS interface to fetch through on a cache miss.
    * \param signal name of the IO signal.
@@ -674,6 +679,14 @@ private:
    */
   template <typename Interface>
   std::optional<IOSignalType> resolveIOSignalType(Interface& interface, const std::string& signal);
+
+  /**
+   * \brief Drops the cached IO signal types, so the next lookup refetches the table.
+   *
+   * Called when the controller rejects a write made through a cached type: that is the observable signature of a
+   * signal that has been retyped since the table was read.
+   */
+  void invalidateIOSignalTypes();
 
   rclcpp::Node::SharedPtr node_;
 
@@ -723,12 +736,12 @@ private:
   std::map<std::string, IOSignalType> io_signal_types_;
 
   /**
-   * \brief Whether io_signal_types_ has ever been populated.
+   * \brief Signals looked for and not found, and when, for rate-limiting refetches by name.
    */
-  bool io_signal_types_loaded_{ false };
+  std::map<std::string, std::chrono::steady_clock::time_point> io_signal_types_missing_;
 
   /**
-   * \brief When io_signal_types_ was last fetched, for rate-limiting refreshes on a miss.
+   * \brief When io_signal_types_ was last fetched, for expiring it and for rate-limiting refetches.
    */
   std::chrono::steady_clock::time_point io_signal_types_fetched_{};
 
@@ -741,6 +754,11 @@ private:
    * \brief Shortest interval between signal table refetches triggered by a cache miss.
    */
   static constexpr std::chrono::seconds CACHE_MISS_REFRESH_INTERVAL{ 5 };
+
+  /**
+   * \brief How long a fetched signal table is trusted before it is read again.
+   */
+  static constexpr std::chrono::seconds CACHE_TTL{ 30 };
 };
 
 }  // namespace abb_rws_client

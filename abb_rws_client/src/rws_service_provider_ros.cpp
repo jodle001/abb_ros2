@@ -569,24 +569,46 @@ RWSServiceProviderROS::resolveIOSignalType(Interface& interface, const std::stri
 {
   std::lock_guard<std::mutex> guard{ io_signal_types_mutex_ };
 
-  const auto cached = io_signal_types_.find(signal);
-  if (cached != io_signal_types_.end())
-  {
-    return cached->second;
-  }
-
-  // A miss is either the first write of this session or a signal the controller does not have. Refetching the table is
-  // a full GET, so rate-limit it: without that, a caller repeatedly naming a nonexistent signal would put one back in
-  // front of every other RWS operation.
   const auto now = std::chrono::steady_clock::now();
-  if (io_signal_types_loaded_ && now - io_signal_types_fetched_ < CACHE_MISS_REFRESH_INTERVAL)
+  const bool cache_is_fresh =
+      io_signal_types_fetched_ != std::chrono::steady_clock::time_point{} && now - io_signal_types_fetched_ < CACHE_TTL;
+
+  if (cache_is_fresh)
   {
-    return std::nullopt;
+    const auto cached = io_signal_types_.find(signal);
+    if (cached != io_signal_types_.end())
+    {
+      return cached->second;
+    }
+
+    // A miss is either a signal not asked for since the last fetch or one the controller does not have, and refetching
+    // the table is a full GET. Rate-limit by name rather than globally: a caller repeatedly naming a nonexistent signal
+    // still cannot put a GET in front of every other RWS operation, while a signal that has not been asked for yet
+    // gets a fetch, so one that librws dropped from the table transiently is retried instead of being reported missing
+    // for the rest of the interval.
+    const auto missing = io_signal_types_missing_.find(signal);
+    if (missing != io_signal_types_missing_.end() && now - missing->second < CACHE_MISS_REFRESH_INTERVAL)
+    {
+      return std::nullopt;
+    }
   }
 
   const auto signals = interface.getIOSignals();
   io_signal_types_fetched_ = now;
-  io_signal_types_loaded_ = true;
+
+  // Keep the rate limit of every name still inside its interval, and only those, so that alternating nonexistent
+  // names cannot clear each other's limit and the map cannot grow without bound.
+  for (auto it = io_signal_types_missing_.begin(); it != io_signal_types_missing_.end();)
+  {
+    if (now - it->second >= CACHE_MISS_REFRESH_INTERVAL)
+    {
+      it = io_signal_types_missing_.erase(it);
+    }
+    else
+    {
+      ++it;
+    }
+  }
 
   io_signal_types_.clear();
   for (const auto& [name, value] : signals)
@@ -608,9 +630,21 @@ RWSServiceProviderROS::resolveIOSignalType(Interface& interface, const std::stri
   const auto refreshed = io_signal_types_.find(signal);
   if (refreshed == io_signal_types_.end())
   {
+    io_signal_types_missing_[signal] = now;
     return std::nullopt;
   }
+
+  io_signal_types_missing_.erase(signal);
   return refreshed->second;
+}
+
+void RWSServiceProviderROS::invalidateIOSignalTypes()
+{
+  std::lock_guard<std::mutex> guard{ io_signal_types_mutex_ };
+
+  io_signal_types_.clear();
+  io_signal_types_missing_.clear();
+  io_signal_types_fetched_ = {};
 }
 
 bool RWSServiceProviderROS::setIOSignal(const abb_robot_msgs::srv::SetIOSignal::Request::SharedPtr req,
@@ -632,8 +666,9 @@ bool RWSServiceProviderROS::setIOSignal(const abb_robot_msgs::srv::SetIOSignal::
       // API; only the typed public setters (setDigitalSignal/setAnalogSignal/setGroupSignal)
       // remain. Resolve the signal's actual type and dispatch to the matching typed setter, so
       // analog and group signals are preserved and not silently coerced to digital. The lookup
-      // is served from cache: reading the signal table on every write is what made an IO write
-      // cost two RWS round-trips on the lane every caller of this node shares.
+      // is served from a cache with a lifetime: reading the signal table on every write is what
+      // made an IO write cost two RWS round-trips on the lane every caller of this node shares,
+      // and never rereading it would outlive the controller warm start that retypes a signal.
       const auto type = resolveIOSignalType(interface, req->signal);
       if (!type)
       {
@@ -672,6 +707,9 @@ bool RWSServiceProviderROS::setIOSignal(const abb_robot_msgs::srv::SetIOSignal::
     }
     catch (const std::exception& exception)
     {
+      // A typed setter the controller rejects is what a stale cached type looks like from here, so
+      // drop the table rather than dispatch the same wrong way until it expires on its own.
+      invalidateIOSignalTypes();
       res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
       RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
