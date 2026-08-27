@@ -22,6 +22,14 @@ int main(int argc, char** argv)
   client_node->get_parameter<std::string>("controller_generation", controller_generation);
 
   const auto rws_version = abb::robot::rwsVersionFromControllerGeneration(controller_generation);
+  if (!abb::robot::isKnownControllerGeneration(controller_generation))
+  {
+    RCLCPP_WARN_STREAM(client_node->get_logger(),
+                       "Controller generation '"
+                           << controller_generation
+                           << "' is not recognised, treating it as an IRC5. Expected 'irc5' or 'omnicore'. An OmniCore "
+                              "reached over RWS 1.0 will not answer, and the only symptom is a connect retry loop.");
+  }
   RCLCPP_INFO_STREAM(client_node->get_logger(),
                      "Controller generation '" << controller_generation << "', using RWS "
                                                << (rws_version == abb::robot::RWSVersion::v2_0 ? "2.0" : "1.0"));

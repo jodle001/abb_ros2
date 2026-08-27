@@ -43,12 +43,20 @@ namespace abb_hardware_interface {
       return CallbackReturn::ERROR;
     }
 
-    // Get robot controller description from RWS. OmniCore controllers serve RWS 2.0 over
-    // TLS only; the xacro emits controller_generation so the right transport is selected.
+    // Get robot controller description from RWS. OmniCore controllers serve RWS 2.0 over TLS
+    // only, so the transport follows the controller_generation hardware parameter. None of the
+    // ros2_control xacros in this repository emit it; it is optional, and a description that
+    // leaves it out gets the IRC5 behaviour this repository had before.
     const auto controller_generation_it = info_.hardware_parameters.find("controller_generation");
     const auto controller_generation =
         controller_generation_it != info_.hardware_parameters.end() ? controller_generation_it->second : "irc5";
     const auto rws_version = abb::robot::rwsVersionFromControllerGeneration(controller_generation);
+    if (controller_generation_it != info_.hardware_parameters.end() &&
+        !abb::robot::isKnownControllerGeneration(controller_generation)) {
+      RCLCPP_WARN_STREAM(LOGGER, "Controller generation '"
+                                     << controller_generation
+                                     << "' is not recognised, treating it as an IRC5. Expected 'irc5' or 'omnicore'.");
+    }
     RCLCPP_INFO_STREAM(LOGGER, "Controller generation: " << controller_generation << " (RWS "
                                                          << (rws_version == abb::robot::RWSVersion::v2_0 ? "2.0" :
                                                                                                            "1.0")
