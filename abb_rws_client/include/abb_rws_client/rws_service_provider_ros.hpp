@@ -91,7 +91,7 @@ public:
    *
    * \param node ROS 2 node.
    * \param robot_ip IP address for the robot controller's RWS server.
-   * \param robot_poty Port number for the robot controller's RWS server.
+   * \param robot_port Port number for the robot controller's RWS server.
    * \param rws_version of the RWS protocol the controller serves.
    */
   RWSServiceProviderROS(const rclcpp::Node::SharedPtr& node, const std::string& robot_ip, unsigned short robot_port,

@@ -63,8 +63,7 @@ namespace abb_hardware_interface {
                                                          << ")");
 
     auto rws_manager = abb::robot::makeRWSManager(rws_version, rws_ip, rws_port, "Default User", "robotics");
-    const auto robot_controller_description_ =
-        abb::robot::utilities::establishRWSConnection(*rws_manager, "IRB1200", true);
+    robot_controller_description_ = abb::robot::utilities::establishRWSConnection(*rws_manager, "IRB1200", true);
     RCLCPP_INFO_STREAM(LOGGER, "Robot controller description:\n"
                        << abb::robot::summaryText(robot_controller_description_));
 
