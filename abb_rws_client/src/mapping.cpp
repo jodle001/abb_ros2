@@ -186,7 +186,8 @@ abb_rapid_msgs::msg::WObjData map(const rws::WObjData& rws_wobjdata)
   return ros_wobjdata;
 }
 
-abb_rapid_sm_addin_msgs::msg::EGMSettings map(const rws::v1_0::RWSStateMachineInterface::EGMSettings& rws_egm_settings)
+template <typename EGMSettingsType>
+abb_rapid_sm_addin_msgs::msg::EGMSettings mapEGMSettings(const EGMSettingsType& rws_egm_settings)
 {
   abb_rapid_sm_addin_msgs::msg::EGMSettings ros_egm_settings;
 
@@ -326,9 +327,10 @@ rws::WObjData map(const abb_rapid_msgs::msg::WObjData& ros_wobjdata)
   return rws_wobjdata;
 }
 
-rws::v1_0::RWSStateMachineInterface::EGMSettings map(const abb_rapid_sm_addin_msgs::msg::EGMSettings& ros_egm_settings)
+template <typename EGMSettingsType>
+void mapEGMSettings(const abb_rapid_sm_addin_msgs::msg::EGMSettings& ros_egm_settings,
+                    EGMSettingsType& rws_egm_settings)
 {
-  rws::v1_0::RWSStateMachineInterface::EGMSettings rws_egm_settings;
 
   rws_egm_settings.allow_egm_motions.value = ros_egm_settings.allow_egm_motions;
   rws_egm_settings.use_presync.value = ros_egm_settings.use_presync;
@@ -351,8 +353,6 @@ rws::v1_0::RWSStateMachineInterface::EGMSettings map(const abb_rapid_sm_addin_ms
   rws_egm_settings.run.pos_corr_gain = ros_egm_settings.run.pos_corr_gain;
 
   rws_egm_settings.stop.ramp_out_time = ros_egm_settings.stop.ramp_out_time;
-
-  return rws_egm_settings;
 }
 
 uint8_t map(egm::wrapper::Status::EGMState state)
@@ -433,6 +433,21 @@ template std::string mapVectorToString<std::string>(const std::vector<std::strin
 template std::string mapVectorToString<bool>(const std::vector<bool>& vector);
 template std::string mapVectorToString<int>(const std::vector<int>& vector);
 template std::string mapVectorToString<double>(const std::vector<double>& vector);
+
+
+/*
+ * The two librws state machine interfaces are identical apart from their namespace, so the
+ * EGMSettings mappings above are shared and instantiated once per version.
+ */
+template abb_rapid_sm_addin_msgs::msg::EGMSettings
+mapEGMSettings(const rws::v1_0::RWSStateMachineInterface::EGMSettings& rws_egm_settings);
+template abb_rapid_sm_addin_msgs::msg::EGMSettings
+mapEGMSettings(const rws::v2_0::RWSStateMachineInterface::EGMSettings& rws_egm_settings);
+
+template void mapEGMSettings(const abb_rapid_sm_addin_msgs::msg::EGMSettings& ros_egm_settings,
+                             rws::v1_0::RWSStateMachineInterface::EGMSettings& rws_egm_settings);
+template void mapEGMSettings(const abb_rapid_sm_addin_msgs::msg::EGMSettings& ros_egm_settings,
+                             rws::v2_0::RWSStateMachineInterface::EGMSettings& rws_egm_settings);
 
 }  // namespace utilities
 }  // namespace robot

@@ -40,7 +40,10 @@
 
 #include <abb_rws_client/rws_service_provider_ros.hpp>
 
+#include <charconv>
+#include <cstdint>
 #include <stdexcept>
+#include <string>
 #include <variant>
 
 #include <abb_robot_msgs/msg/service_responses.hpp>
@@ -52,15 +55,37 @@ using RAPIDSymbols = abb::rws::v1_0::RWSStateMachineInterface::ResourceIdentifie
 
 namespace abb_rws_client
 {
+namespace
+{
+/**
+ * \brief Parses the value of a write to a group IO signal.
+ *
+ * \param text value to parse.
+ * \param value parsed value, only assigned on success.
+ *
+ * \return bool true if text is a plain decimal unsigned integer that a group signal can hold.
+ */
+bool parseGroupSignalValue(const std::string& text, std::uint32_t& value)
+{
+  const auto* const end = text.data() + text.size();
+  const auto result = std::from_chars(text.data(), end, value);
+
+  // Require the whole string to have been consumed: from_chars stops at the first character that
+  // is not part of the number, so a partial parse is a malformed value, not a valid prefix.
+  return result.ec == std::errc{} && result.ptr == end;
+}
+}  // namespace
+
 RWSServiceProviderROS::RWSServiceProviderROS(const rclcpp::Node::SharedPtr& node, const std::string& robot_ip,
-                                             unsigned short robot_port)
+                                             unsigned short robot_port, abb::robot::RWSVersion rws_version)
   : node_(node)
-  , rws_manager_{ robot_ip, robot_port, abb::rws::v1_0::DEFAULT_USERNAME, abb::rws::v1_0::DEFAULT_PASSWORD }
+  , rws_manager_{ abb::robot::makeRWSManager(rws_version, robot_ip, robot_port, abb::rws::v1_0::DEFAULT_USERNAME,
+                                             abb::rws::v1_0::DEFAULT_PASSWORD) }
 {
   std::string robot_id = node_->get_parameter("robot_nickname").as_string();
   bool no_connection_timeout = node_->get_parameter("no_connection_timeout").as_bool();
   robot_controller_description_ =
-      abb::robot::utilities::establishRWSConnection(rws_manager_, robot_id, no_connection_timeout);
+      abb::robot::utilities::establishRWSConnection(*rws_manager_, robot_id, no_connection_timeout);
   abb::robot::utilities::verifyRobotWareVersion(robot_controller_description_.header().robot_ware_version());
 
   system_state_sub_ = node_->create_subscription<abb_robot_msgs::msg::SystemState>(
@@ -237,7 +262,7 @@ bool RWSServiceProviderROS::getFileContents(const abb_robot_msgs::srv::GetFileCo
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       res->contents = interface.getFile(abb::rws::FileResource(req->filename));
@@ -266,7 +291,7 @@ bool RWSServiceProviderROS::getIOSignal(const abb_robot_msgs::srv::GetIOSignal::
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       // RWSInterface::getIOSignal(name) is private in the modernized API; use the
@@ -307,7 +332,7 @@ bool RWSServiceProviderROS::getRAPIDBool(const abb_robot_msgs::srv::GetRAPIDBool
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       abb::rws::RAPIDBool rapid_bool;
@@ -339,7 +364,7 @@ bool RWSServiceProviderROS::getRAPIDDNum(const abb_robot_msgs::srv::GetRAPIDDnum
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       abb::rws::RAPIDDnum rapid_dnum;
@@ -371,7 +396,7 @@ bool RWSServiceProviderROS::getRAPIDNum(const abb_robot_msgs::srv::GetRAPIDNum::
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       abb::rws::RAPIDNum rapid_num{};
@@ -403,7 +428,7 @@ bool RWSServiceProviderROS::getRAPIDString(const abb_robot_msgs::srv::GetRAPIDSt
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       abb::rws::RAPIDString rapid_string{};
@@ -435,7 +460,7 @@ bool RWSServiceProviderROS::getRAPIDSymbol(const abb_robot_msgs::srv::GetRAPIDSy
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       res->value = interface.getRAPIDSymbolData(req->path.task, req->path.module, req->path.symbol);
@@ -460,7 +485,7 @@ bool RWSServiceProviderROS::getSpeedRatio(const abb_robot_msgs::srv::GetSpeedRat
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       res->speed_ratio = interface.getSpeedRatio();
@@ -493,7 +518,7 @@ bool RWSServiceProviderROS::ppToMain(const abb_robot_msgs::srv::TriggerWithResul
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       interface.resetRAPIDProgramPointer();
@@ -521,7 +546,7 @@ bool RWSServiceProviderROS::setFileContents(const abb_robot_msgs::srv::SetFileCo
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       interface.uploadFile(abb::rws::FileResource(req->filename), req->contents);
@@ -538,6 +563,90 @@ bool RWSServiceProviderROS::setFileContents(const abb_robot_msgs::srv::SetFileCo
   return true;
 }
 
+template <typename Interface>
+std::optional<RWSServiceProviderROS::IOSignalType>
+RWSServiceProviderROS::resolveIOSignalType(Interface& interface, const std::string& signal)
+{
+  std::lock_guard<std::mutex> guard{ io_signal_types_mutex_ };
+
+  const auto now = std::chrono::steady_clock::now();
+  const bool cache_is_fresh =
+      io_signal_types_fetched_ != std::chrono::steady_clock::time_point{} && now - io_signal_types_fetched_ < CACHE_TTL;
+
+  if (cache_is_fresh)
+  {
+    const auto cached = io_signal_types_.find(signal);
+    if (cached != io_signal_types_.end())
+    {
+      return cached->second;
+    }
+
+    // A miss is either a signal not asked for since the last fetch or one the controller does not have, and refetching
+    // the table is a full GET. Rate-limit by name rather than globally: a caller repeatedly naming a nonexistent signal
+    // still cannot put a GET in front of every other RWS operation, while a signal that has not been asked for yet
+    // gets a fetch, so one that librws dropped from the table transiently is retried instead of being reported missing
+    // for the rest of the interval.
+    const auto missing = io_signal_types_missing_.find(signal);
+    if (missing != io_signal_types_missing_.end() && now - missing->second < CACHE_MISS_REFRESH_INTERVAL)
+    {
+      return std::nullopt;
+    }
+  }
+
+  const auto signals = interface.getIOSignals();
+  io_signal_types_fetched_ = now;
+
+  // Keep the rate limit of every name still inside its interval, and only those, so that alternating nonexistent
+  // names cannot clear each other's limit and the map cannot grow without bound.
+  for (auto it = io_signal_types_missing_.begin(); it != io_signal_types_missing_.end();)
+  {
+    if (now - it->second >= CACHE_MISS_REFRESH_INTERVAL)
+    {
+      it = io_signal_types_missing_.erase(it);
+    }
+    else
+    {
+      ++it;
+    }
+  }
+
+  io_signal_types_.clear();
+  for (const auto& [name, value] : signals)
+  {
+    if (std::holds_alternative<float>(value))
+    {
+      io_signal_types_[name] = IOSignalType::Analog;
+    }
+    else if (std::holds_alternative<std::uint32_t>(value))
+    {
+      io_signal_types_[name] = IOSignalType::Group;
+    }
+    else
+    {
+      io_signal_types_[name] = IOSignalType::Digital;
+    }
+  }
+
+  const auto refreshed = io_signal_types_.find(signal);
+  if (refreshed == io_signal_types_.end())
+  {
+    io_signal_types_missing_[signal] = now;
+    return std::nullopt;
+  }
+
+  io_signal_types_missing_.erase(signal);
+  return refreshed->second;
+}
+
+void RWSServiceProviderROS::invalidateIOSignalTypes()
+{
+  std::lock_guard<std::mutex> guard{ io_signal_types_mutex_ };
+
+  io_signal_types_.clear();
+  io_signal_types_missing_.clear();
+  io_signal_types_fetched_ = {};
+}
+
 bool RWSServiceProviderROS::setIOSignal(const abb_robot_msgs::srv::SetIOSignal::Request::SharedPtr req,
                                         abb_robot_msgs::srv::SetIOSignal::Response::SharedPtr res)
 {
@@ -550,25 +659,43 @@ bool RWSServiceProviderROS::setIOSignal(const abb_robot_msgs::srv::SetIOSignal::
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       // The string-valued RWSInterface::setIOSignal(name, value) is private in the modernized
-      // API; only the typed public setters (setDigitalSignal/setAnalogSignal) remain. Resolve
-      // the signal's actual type from the controller (getIOSignals() reports each signal as a
-      // bool or float variant) and dispatch to the matching typed setter, so analog signals are
-      // preserved and not silently coerced to digital.
-      const auto signals = interface.getIOSignals();
-      const auto it = signals.find(req->signal);
-      if (it == signals.end())
+      // API; only the typed public setters (setDigitalSignal/setAnalogSignal/setGroupSignal)
+      // remain. Resolve the signal's actual type and dispatch to the matching typed setter, so
+      // analog and group signals are preserved and not silently coerced to digital. The lookup
+      // is served from a cache with a lifetime: reading the signal table on every write is what
+      // made an IO write cost two RWS round-trips on the lane every caller of this node shares,
+      // and never rereading it would outlive the controller warm start that retypes a signal.
+      const auto type = resolveIOSignalType(interface, req->signal);
+      if (!type)
       {
         res->message = "IO signal '" + req->signal + "' not found on the controller";
         res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
         return;
       }
-      if (std::holds_alternative<float>(it->second))
+      if (*type == IOSignalType::Analog)
       {
         interface.setAnalogSignal(req->signal, std::stof(req->value));
+      }
+      else if (*type == IOSignalType::Group)
+      {
+        // A group signal carries an unsigned integer. Accept a plain decimal literal only, and
+        // reject anything else rather than write a number the caller did not ask for: std::stoul
+        // reads "-1" as 4294967295, stops at the 'x' in "0x10" and writes 0, and truncates "3.9"
+        // to 3, each of them reported back as a successful write. The digital spellings below
+        // ("high", "true") have no meaning for a group either.
+        std::uint32_t value{};
+        if (!parseGroupSignalValue(req->value, value))
+        {
+          res->message = "IO signal '" + req->signal +
+                         "' is a group signal and takes an unsigned decimal integer, got '" + req->value + "'";
+          res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
+          return;
+        }
+        interface.setGroupSignal(req->signal, value);
       }
       else
       {
@@ -580,6 +707,9 @@ bool RWSServiceProviderROS::setIOSignal(const abb_robot_msgs::srv::SetIOSignal::
     }
     catch (const std::exception& exception)
     {
+      // A typed setter the controller rejects is what a stale cached type looks like from here, so
+      // drop the table rather than dispatch the same wrong way until it expires on its own.
+      invalidateIOSignalTypes();
       res->message = exception.what();
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
       RCLCPP_DEBUG_STREAM(node_->get_logger(), exception.what());
@@ -597,7 +727,7 @@ bool RWSServiceProviderROS::setMotorsOff(const abb_robot_msgs::srv::TriggerWithR
     return true;
   }
 
-  rws_manager_.runPriorityService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runPriorityService([&](auto& interface) {
     try
     {
       interface.setMotorsOff();
@@ -629,7 +759,7 @@ bool RWSServiceProviderROS::setMotorsOn(const abb_robot_msgs::srv::TriggerWithRe
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       interface.setMotorsOn();
@@ -661,7 +791,7 @@ bool RWSServiceProviderROS::setRAPIDBool(const abb_robot_msgs::srv::SetRAPIDBool
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       abb::rws::RAPIDBool rapid_bool = static_cast<bool>(req->value);
@@ -696,7 +826,7 @@ bool RWSServiceProviderROS::setRAPIDDNum(const abb_robot_msgs::srv::SetRAPIDDnum
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       abb::rws::RAPIDDnum rapid_dnum = req->value;
@@ -731,7 +861,7 @@ bool RWSServiceProviderROS::setRAPIDNum(const abb_robot_msgs::srv::SetRAPIDNum::
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       abb::rws::RAPIDNum rapid_num = req->value;
@@ -766,7 +896,7 @@ bool RWSServiceProviderROS::setRAPIDString(const abb_robot_msgs::srv::SetRAPIDSt
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       abb::rws::RAPIDString rapid_string = req->value;
@@ -801,7 +931,7 @@ bool RWSServiceProviderROS::setRAPIDSymbol(const abb_robot_msgs::srv::SetRAPIDSy
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       interface.setRAPIDSymbolData(req->path.task, req->path.module, req->path.symbol, req->value);
@@ -830,7 +960,7 @@ bool RWSServiceProviderROS::setSpeedRatio(const abb_robot_msgs::srv::SetSpeedRat
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       interface.setSpeedRatio(req->speed_ratio);
@@ -863,7 +993,7 @@ bool RWSServiceProviderROS::startRAPID(const abb_robot_msgs::srv::TriggerWithRes
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       interface.startRAPIDExecution();
@@ -887,7 +1017,7 @@ bool RWSServiceProviderROS::stopRAPID(const abb_robot_msgs::srv::TriggerWithResu
     return true;
   }
 
-  rws_manager_.runPriorityService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runPriorityService([&](auto& interface) {
     try
     {
       interface.stopRAPIDExecution();
@@ -927,10 +1057,10 @@ bool RWSServiceProviderROS::getEGMSettings(const abb_rapid_sm_addin_msgs::srv::G
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
-      abb::rws::v1_0::RWSStateMachineInterface::EGMSettings settings;
+      typename std::decay_t<decltype(interface)>::EGMSettings settings;
       interface.services().egm().getSettings(req->task, &settings);
       res->settings = abb::robot::utilities::map(settings);
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
@@ -974,10 +1104,11 @@ bool RWSServiceProviderROS::setEGMSettings(const abb_rapid_sm_addin_msgs::srv::S
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
-      abb::rws::v1_0::RWSStateMachineInterface::EGMSettings settings = abb::robot::utilities::map(req->settings);
+      typename std::decay_t<decltype(interface)>::EGMSettings settings;
+      abb::robot::utilities::map(req->settings, settings);
       interface.services().egm().setSettings(req->task, settings);
       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
     }
@@ -1012,7 +1143,7 @@ bool RWSServiceProviderROS::runRAPIDRoutine(const abb_robot_msgs::srv::TriggerWi
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       interface.services().rapid().signalRunRAPIDRoutine();
@@ -1049,7 +1180,7 @@ bool RWSServiceProviderROS::runSGRoutine(const abb_robot_msgs::srv::TriggerWithR
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       interface.services().sg().signalRunSGRoutine();
@@ -1094,7 +1225,7 @@ bool RWSServiceProviderROS::setRAPIDRoutine(const abb_rapid_sm_addin_msgs::srv::
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       interface.services().rapid().setRoutineName(req->task, req->routine);
@@ -1151,7 +1282,7 @@ bool RWSServiceProviderROS::setSGCommand(const abb_rapid_sm_addin_msgs::srv::Set
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       abb::rws::RAPIDNum sg_command_input = static_cast<float>(req_command);
@@ -1194,7 +1325,7 @@ bool RWSServiceProviderROS::startEGMJoint(const abb_robot_msgs::srv::TriggerWith
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       interface.services().egm().signalEGMStartJoint();
@@ -1231,7 +1362,7 @@ bool RWSServiceProviderROS::startEGMPose(const abb_robot_msgs::srv::TriggerWithR
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       interface.services().egm().signalEGMStartPose();
@@ -1268,7 +1399,7 @@ bool RWSServiceProviderROS::startEGMStream(const abb_robot_msgs::srv::TriggerWit
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       interface.services().egm().signalEGMStartStream();
@@ -1301,7 +1432,7 @@ bool RWSServiceProviderROS::stopEGM(const abb_robot_msgs::srv::TriggerWithResult
     return true;
   }
 
-  rws_manager_.runPriorityService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runPriorityService([&](auto& interface) {
     try
     {
       interface.services().egm().signalEGMStop();
@@ -1334,7 +1465,7 @@ bool RWSServiceProviderROS::stopEGMStream(const abb_robot_msgs::srv::TriggerWith
     return true;
   }
 
-  rws_manager_.runService([&](abb::rws::v1_0::RWSStateMachineInterface& interface) {
+  rws_manager_->runService([&](auto& interface) {
     try
     {
       interface.services().egm().signalEGMStopStream();
@@ -1531,7 +1662,7 @@ bool RWSServiceProviderROS::verifyRAPIDStopped(uint16_t& result_code, std::strin
 
 bool RWSServiceProviderROS::verifyRWSManagerReady(uint16_t& result_code, std::string& message)
 {
-  if (!rws_manager_.isInterfaceReady())
+  if (!rws_manager_->isInterfaceReady())
   {
     message = abb_robot_msgs::msg::ServiceResponses::SERVER_IS_BUSY;
     result_code = abb_robot_msgs::msg::ServiceResponses::RC_SERVER_IS_BUSY;
@@ -1540,4 +1671,16 @@ bool RWSServiceProviderROS::verifyRWSManagerReady(uint16_t& result_code, std::st
 
   return true;
 }
+
+/*
+ * resolveIOSignalType only calls getIOSignals(), which both librws interface versions
+ * provide identically, so it is instantiated once per version here.
+ */
+template std::optional<RWSServiceProviderROS::IOSignalType>
+RWSServiceProviderROS::resolveIOSignalType<abb::rws::v1_0::RWSStateMachineInterface>(
+    abb::rws::v1_0::RWSStateMachineInterface& interface, const std::string& signal);
+template std::optional<RWSServiceProviderROS::IOSignalType>
+RWSServiceProviderROS::resolveIOSignalType<abb::rws::v2_0::RWSStateMachineInterface>(
+    abb::rws::v2_0::RWSStateMachineInterface& interface, const std::string& signal);
+
 }  // namespace abb_rws_client

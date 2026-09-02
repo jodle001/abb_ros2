@@ -46,6 +46,8 @@
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <std_msgs/msg/bool.hpp>
 
+#include <memory>
+
 #include <abb_egm_rws_managers/rws_manager.h>
 #include <abb_egm_rws_managers/system_data_parser.h>
 
@@ -63,9 +65,11 @@ public:
    *
    * \param node ROS 2 node.
    * \param robot_ip IP address for the robot controller's RWS server.
-   * \param robot_poty Port number for the robot controller's RWS server.
+   * \param robot_port Port number for the robot controller's RWS server.
+   * \param rws_version of the RWS protocol the controller serves.
    */
-  RWSStatePublisherROS(const rclcpp::Node::SharedPtr& node, const std::string& robot_ip, unsigned short robot_port);
+  RWSStatePublisherROS(const rclcpp::Node::SharedPtr& node, const std::string& robot_ip, unsigned short robot_port,
+                       abb::robot::RWSVersion rws_version = abb::robot::RWSVersion::v1_0);
 
 private:
   /**
@@ -82,9 +86,19 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
 
   /**
+   * \brief Callback group for the polling timer.
+   *
+   * This poll owns its own RWS connection (rws_manager_ below is a separate instance from the service provider's), but
+   * in the node's default group it still consumed the one executor slot every service callback needs, so a poll at
+   * polling_rate sat in front of each IO write and RAPID read served by this node. Nothing the timer touches is shared
+   * with the services, so it belongs in a group of its own.
+   */
+  rclcpp::CallbackGroup::SharedPtr timer_callback_group_;
+
+  /**
    * \brief Manager for handling RWS communication with the robot controller.
    */
-  abb::robot::RWSManager rws_manager_;
+  std::unique_ptr<abb::robot::RWSManagerBase> rws_manager_;
 
   /**
    * \brief Description of the connected robot controller.

@@ -13,12 +13,29 @@ int main(int argc, char** argv)
   client_node->declare_parameter("no_connection_timeout", false);
   std::string robot_ip = client_node->declare_parameter<std::string>("robot_ip", "127.0.0.1");
   int robot_port = client_node->declare_parameter<int>("robot_port", 65535);
+  // IRC5 stations do not set this, so the default keeps them on RWS 1.0 over plain HTTP.
+  std::string controller_generation =
+      client_node->declare_parameter<std::string>("controller_generation", "irc5");
 
   client_node->get_parameter<std::string>("robot_ip", robot_ip);
   client_node->get_parameter<int>("robot_port", robot_port);
+  client_node->get_parameter<std::string>("controller_generation", controller_generation);
 
-  abb_rws_client::RWSServiceProviderROS srv_provider(client_node, robot_ip, robot_port);
-  abb_rws_client::RWSStatePublisherROS state_publisher(client_node, robot_ip, robot_port);
+  const auto rws_version = abb::robot::rwsVersionFromControllerGeneration(controller_generation);
+  if (!abb::robot::isKnownControllerGeneration(controller_generation))
+  {
+    RCLCPP_WARN_STREAM(client_node->get_logger(),
+                       "Controller generation '"
+                           << controller_generation
+                           << "' is not recognised, treating it as an IRC5. Expected 'irc5' or 'omnicore'. An OmniCore "
+                              "reached over RWS 1.0 will not answer, and the only symptom is a connect retry loop.");
+  }
+  RCLCPP_INFO_STREAM(client_node->get_logger(),
+                     "Controller generation '" << controller_generation << "', using RWS "
+                                               << (rws_version == abb::robot::RWSVersion::v2_0 ? "2.0" : "1.0"));
+
+  abb_rws_client::RWSServiceProviderROS srv_provider(client_node, robot_ip, robot_port, rws_version);
+  abb_rws_client::RWSStatePublisherROS state_publisher(client_node, robot_ip, robot_port, rws_version);
 
   rclcpp::executors::MultiThreadedExecutor exec;
   exec.add_node(client_node);
