@@ -104,11 +104,21 @@ void RWSStatePublisherROS::timer_callback()
 {
   try
   {
-    rws_manager_->collectAndUpdateRuntimeData(system_state_data_, motion_data_);
+    // The members only ever hold a snapshot a poll completed: poll into copies and commit
+    // both together once the call returns. A poll that throws part-way leaves the last good
+    // system state and joint states in place, and the two never come from different polls.
+    abb::robot::SystemStateData system_state_data{ system_state_data_ };
+    abb::robot::MotionData motion_data{ motion_data_ };
+    rws_manager_->collectAndUpdateRuntimeData(system_state_data, motion_data);
+    system_state_data_ = system_state_data;
+    motion_data_ = motion_data;
     consecutive_poll_failures_ = 0;
   }
-  catch (const std::runtime_error& exception)
+  catch (const std::exception& exception)
   {
+    // Anything the poll throws is a failed poll: a timeout, a response the manager could not
+    // reconcile with the controller description, or a body the parser rejected. None of
+    // them may unwind through the timer and take the node down.
     if (consecutive_poll_failures_ < POLL_FAILURE_THRESHOLD)
     {
       ++consecutive_poll_failures_;
