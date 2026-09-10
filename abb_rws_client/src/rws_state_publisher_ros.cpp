@@ -114,8 +114,11 @@ void RWSStatePublisherROS::timer_callback()
     motion_data_ = motion_data;
     consecutive_poll_failures_ = 0;
   }
-  catch (const std::runtime_error& exception)
+  catch (const std::exception& exception)
   {
+    // Anything the poll throws is a failed poll: a timeout, a response the manager could not
+    // reconcile with the controller description, or a body the parser rejected. None of
+    // them may unwind through the timer and take the node down.
     if (consecutive_poll_failures_ < POLL_FAILURE_THRESHOLD)
     {
       ++consecutive_poll_failures_;
