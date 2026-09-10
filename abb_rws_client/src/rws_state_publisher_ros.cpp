@@ -104,10 +104,9 @@ void RWSStatePublisherROS::timer_callback()
 {
   try
   {
-    // Poll into copies and commit them only on success. collectAndUpdateRuntimeData() resets
-    // the system state before it starts reading, so polling straight into the members would
-    // publish a zeroed snapshot (rapid_running/motors_on false) whenever a read times out,
-    // which downstream consumers cannot tell apart from a real program stop.
+    // The members only ever hold a snapshot a poll completed: poll into copies and commit
+    // both together once the call returns. A poll that throws part-way leaves the last good
+    // system state and joint states in place, and the two never come from different polls.
     abb::robot::SystemStateData system_state_data{ system_state_data_ };
     abb::robot::MotionData motion_data{ motion_data_ };
     rws_manager_->collectAndUpdateRuntimeData(system_state_data, motion_data);
